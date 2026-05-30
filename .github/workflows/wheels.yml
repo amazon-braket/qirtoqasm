@@ -1,0 +1,126 @@
+# cibuildwheel-driven wheel-build pipeline.
+#
+# Matrix: Linux (manylinux2014 + musllinux_1_2 on x86_64; manylinux2014
+# on aarch64 via QEMU), macOS (x86_64 + arm64), Windows (x86_64). Because
+# the extension is built with PyO3's ``abi3-py311`` feature, one wheel
+# per platform covers Python 3.11, 3.12, and 3.13.
+#
+# PRs run a single-platform smoke; release tags build the full matrix
+# and upload artifacts consumed by `publish-to-pypi.yml`.
+
+name: Build wheels
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+      - feature/**
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  # PR smoke — catches cibuildwheel config drift without running the full
+  # per-platform matrix.
+  build-smoke:
+    name: cibuildwheel smoke (Linux x86_64)
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21.3
+        env:
+          CIBW_ARCHS_LINUX: x86_64
+          CIBW_BUILD: cp311-manylinux_x86_64
+          CIBW_SKIP: "pp*"
+
+      - name: Show built wheels
+        run: ls -la wheelhouse/
+
+  # Full matrix on release publication or `v*` tag pushes.
+  build-wheels:
+    name: Wheels ${{ matrix.os }} (${{ matrix.arch }})
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  arch: x86_64,  cibw_arch: x86_64 }
+          - { os: ubuntu-latest,  arch: aarch64, cibw_arch: aarch64 }
+          - { os: macos-13,       arch: x86_64,  cibw_arch: x86_64 }
+          - { os: macos-14,       arch: arm64,   cibw_arch: arm64 }
+          - { os: windows-latest, arch: x86_64,  cibw_arch: AMD64 }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # QEMU required to cross-build aarch64 Linux wheels on an x86_64 runner.
+      - name: Set up QEMU (for aarch64 Linux)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21.3
+        env:
+          CIBW_ARCHS: ${{ matrix.cibw_arch }}
+          # ``cp311-*`` alone covers 3.11 / 3.12 / 3.13 via abi3.
+          CIBW_BUILD: "cp311-*"
+          CIBW_SKIP: "pp* *-musllinux_i686 *-win32 *-win_arm64"
+          # Linux builds run inside manylinux containers which don't
+          # ship Rust; install it before each job runs.
+          CIBW_BEFORE_ALL_LINUX: "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable --profile minimal"
+          CIBW_ENVIRONMENT_LINUX: 'PATH="$HOME/.cargo/bin:$PATH"'
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux2014
+          CIBW_MUSLLINUX_X86_64_IMAGE: musllinux_1_2
+          CIBW_TEST_COMMAND: 'python -c "import qirtoqasm; print(qirtoqasm.__version__)"'
+
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+
+  # Source distribution.
+  build-sdist:
+    name: sdist
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install maturin
+        run: pip install 'maturin>=1.5,<2.0'
+      - name: Build sdist
+        run: maturin sdist --out dist
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: ./dist/*.tar.gz

@@ -1,0 +1,36 @@
+[run]
+parallel = True
+branch = True
+source =
+    qirtoqasm
+omit =
+    */site-packages/*
+    */_qirtoqasm_native*
+    */test/*
+
+[paths]
+source =
+    python/qirtoqasm
+    */site-packages/qirtoqasm
+
+[report]
+show_missing = True
+ignore_errors = True
+exclude_lines =
+    # Have to re-enable the standard pragma
+    pragma: no cover
+
+    # Don't complain if tests don't hit defensive assertion code
+    raise NotImplementedError
+
+    # Don't complain about type-checking-only imports
+    if TYPE_CHECKING:
+
+    # Don't complain about __main__ guards
+    if __name__ == .__main__.:
+
+[html]
+directory = build/coverage
+
+[xml]
+output = build/coverage/coverage.xml

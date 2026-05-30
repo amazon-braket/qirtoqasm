@@ -1,0 +1,61 @@
+# Publish wheels + sdist to PyPI via trusted publishing (OIDC) when a
+# GitHub release is published. Requires a PyPI trusted publisher for
+# this repo pointed at this workflow file and the ``pypi`` environment
+# below. See https://docs.pypi.org/trusted-publishers/ for setup.
+
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Wait for wheels.yml (triggered by the same release event) to finish
+  # and upload its artifacts; then download them here and publish in one
+  # step.
+  publish:
+    name: Publish distribution to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/qirtoqasm
+    permissions:
+      id-token: write
+    steps:
+      - name: Wait for wheels.yml artifacts
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: sdist
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 20
+          allowed-conclusions: success
+
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.run_id }}
+
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.run_id }}
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

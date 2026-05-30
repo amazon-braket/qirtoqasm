@@ -1,0 +1,16 @@
+[package]
+name = "qirtoqasm-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Pure-Rust QIR to Braket-compatible OpenQASM 3 translator core."
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+indexmap.workspace = true
+
+[dev-dependencies]
+# Property-based tests added later; scaffolded empty for now.

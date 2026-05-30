@@ -1,0 +1,17 @@
+[package]
+name = "qirtoqasm-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "PyO3 bindings for qirtoqasm."
+repository.workspace = true
+
+[lib]
+name = "_qirtoqasm_native"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+qirtoqasm-core.workspace = true
+pyo3.workspace = true

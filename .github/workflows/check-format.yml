@@ -1,0 +1,27 @@
+# Runs ``tox -e linters-check`` on every PR (ruff check + ruff format
+# --check + version-sync check — read-only).
+
+name: Check code format
+
+on:
+  pull_request:
+    branches:
+      - main
+      - feature/**
+
+permissions:
+  contents: read
+
+jobs:
+  check-code-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install tox
+        run: pip install tox
+      - name: Run lint + format checks
+        run: tox -e linters-check

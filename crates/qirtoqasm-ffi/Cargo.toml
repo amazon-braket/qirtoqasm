@@ -1,0 +1,16 @@
+[package]
+name = "qirtoqasm-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "C ABI for the qirtoqasm translator."
+repository.workspace = true
+
+[lib]
+name = "qirtoqasm"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+qirtoqasm-core.workspace = true

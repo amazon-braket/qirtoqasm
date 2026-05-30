@@ -1,0 +1,32 @@
+# .readthedocs.yml
+# Read the Docs configuration for qirtoqasm.
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details.
+
+version: 2
+
+# Build the docs with Sphinx from the ``doc/`` directory.
+sphinx:
+  configuration: doc/conf.py
+
+# Build HTML only. A PDF build would try to pull LaTeX and delay every
+# push; we can re-enable it if consumers ask for it.
+formats: []
+
+build:
+  os: ubuntu-lts-latest
+  tools:
+    python: "3.11"
+    rust: "latest"
+  jobs:
+    # Install maturin and build/install the wheel from the source tree
+    # before Sphinx runs autodoc. This lets autodoc inspect the real
+    # PyO3-backed classes and surface their actual signatures, rather
+    # than the ``autodoc_mock_imports`` stubs (which we still keep as a
+    # fallback if an RTD build loses Rust for any reason).
+    post_install:
+      - pip install 'maturin>=1.5,<2.0'
+      - maturin develop --release
+
+python:
+  install:
+    - requirements: doc/requirements.txt
