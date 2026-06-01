@@ -19,7 +19,7 @@ Public API:
   only positional argument is the QIR source. Every tunable is a
   keyword-only argument with a default, so new options can be added
   without breaking existing callers.
-- :class:`QIRTOQASMError` — single exception raised on any failure.
+- :class:`QirToQasmError` — single exception raised on any failure.
 
 Example::
 
@@ -34,11 +34,11 @@ from __future__ import annotations
 from qirtoqasm import _qirtoqasm_native as _rust
 from qirtoqasm._version import __version__
 
-QIRTOQASMError = _rust.QIRTOQASMError
+QirToQasmError = _rust.QirToQasmError
 translate = _rust.translate
 
 __all__ = [
-    "QIRTOQASMError",
+    "QirToQasmError",
     "__version__",
     "translate",
 ]

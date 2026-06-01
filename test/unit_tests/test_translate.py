@@ -30,10 +30,10 @@ import qirtoqasm
 
 def test_module_exposes_public_api() -> None:
     assert hasattr(qirtoqasm, "translate")
-    assert hasattr(qirtoqasm, "QIRTOQASMError")
+    assert hasattr(qirtoqasm, "QirToQasmError")
     assert hasattr(qirtoqasm, "__version__")
     # ``__all__`` lists the supported public surface.
-    assert set(qirtoqasm.__all__) == {"QIRTOQASMError", "__version__", "translate"}
+    assert set(qirtoqasm.__all__) == {"QirToQasmError", "__version__", "translate"}
 
 
 def test_version_is_a_nonempty_string() -> None:
@@ -42,14 +42,14 @@ def test_version_is_a_nonempty_string() -> None:
 
 
 def test_translate_raises_not_yet_implemented() -> None:
-    with pytest.raises(qirtoqasm.QIRTOQASMError, match="not yet implemented"):
+    with pytest.raises(qirtoqasm.QirToQasmError, match="not yet implemented"):
         qirtoqasm.translate("anything")
 
 
 def test_translate_with_producer_kwarg_still_raises() -> None:
     # The keyword-only ``producer`` argument is part of the public
     # signature; the stub still errors regardless.
-    with pytest.raises(qirtoqasm.QIRTOQASMError, match="not yet implemented"):
+    with pytest.raises(qirtoqasm.QirToQasmError, match="not yet implemented"):
         qirtoqasm.translate("anything", producer="mylib 0.1.2")
 
 

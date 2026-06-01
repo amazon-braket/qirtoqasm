@@ -17,7 +17,7 @@ Translation
 Exceptions
 ----------
 
-.. autoexception:: qirtoqasm.QIRTOQASMError
+.. autoexception:: qirtoqasm.QirToQasmError
 
 
 Version

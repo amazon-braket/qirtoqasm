@@ -248,12 +248,12 @@ workflow.
   loops (one back-edge), and short-circuit phi merges.
 - Structs `%Qubit` and `%Result`, plus inline struct-by-value
   parameter literals (`{ double*, i64 }`). Other user-defined struct
-  types raise `QIRTOQASMError`.
+  types raise `QirToQasmError`.
 
 
 ## Out of scope (produce a clear error)
 
-All unsupported cases raise `qirtoqasm.QIRTOQASMError` with a message
+All unsupported cases raise `qirtoqasm.QirToQasmError` with a message
 naming the root cause.
 
 - Nested or irreducible CFGs, multi-entry loops, nested loops the
