@@ -1,0 +1,39 @@
+# Single-platform cibuildwheel smoke that runs on every PR. Catches
+# cibuildwheel config drift without paying for the full per-platform
+# matrix; the full matrix runs from `wheels.yml` on tags / releases.
+
+name: Wheel smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+      - feature/**
+
+permissions:
+  contents: read
+
+jobs:
+  build-smoke:
+    name: cibuildwheel smoke (Linux x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21.3
+        env:
+          CIBW_ARCHS_LINUX: x86_64
+          CIBW_BUILD: cp311-manylinux_x86_64
+          CIBW_SKIP: "pp*"
+
+      - name: Show built wheels
+        run: ls -la wheelhouse/
