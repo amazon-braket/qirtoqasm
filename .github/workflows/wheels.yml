@@ -44,7 +44,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.x"
 
       # QEMU required to cross-build aarch64 Linux wheels on an x86_64 runner.
       - name: Set up QEMU (for aarch64 Linux)
@@ -83,7 +83,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.x"
       - uses: dtolnay/rust-toolchain@stable
       - name: Install maturin
         run: pip install 'maturin>=1.5,<2.0'
