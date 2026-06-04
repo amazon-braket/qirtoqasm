@@ -5,9 +5,7 @@
 //! AST nodes emitted by the translator.
 //!
 //! This is intentionally a strict subset of OpenQASM 3: only the
-//! constructs `qirtoqasm` produces are modelled. The types align
-//! one-to-one with the `openqasm3.ast` classes the current Python
-//! implementation uses so the printer can reproduce its bytes.
+//! constructs `qirtoqasm` produces are modelled.
 
 /// A complete program.
 #[derive(Debug, Clone, PartialEq)]
