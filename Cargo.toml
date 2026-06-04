@@ -28,7 +28,7 @@ repository = "https://github.com/amazon-braket/qirtoqasm"
 
 [workspace.dependencies]
 qirtoqasm-core = { path = "crates/qirtoqasm-core" }
-thiserror = "=1.0.50"
+thiserror = "=2.0.18"
 indexmap = "=2.2.6"
 pyo3 = { version = "=0.21.2", features = ["extension-module", "abi3-py311"] }
 
