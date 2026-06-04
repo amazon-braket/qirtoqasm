@@ -42,11 +42,11 @@ pub enum Statement {
         /// Initial value expression.
         init: Expression,
     },
-    /// `<target> = <value>;` — assignment to a previously-declared classical
-    /// variable or register element.
+    /// `<target> = <value>;` — assignment to a previously-declared
+    /// classical lvalue.
     Assignment {
-        /// Target identifier (bare name, e.g. a classical int variable).
-        target: String,
+        /// Target lvalue (bare name for a scalar; indexed for a register element).
+        target: IndexedIdentifier,
         /// Assigned value.
         value: Expression,
     },
@@ -163,7 +163,8 @@ pub fn int(n: i64) -> Expression {
     Expression::Integer(n)
 }
 
-/// Assignment-target / qubit-operand form of `<name>[<index>]`.
+/// Reference form `<name>` or `<name>[<index>]` used in lvalue and
+/// gate-operand positions; the index is optional.
 ///
 /// Distinct from [`Expression::Index`]: the OpenQASM 3 grammar uses
 /// this node only in positions where a reference is required (gate
@@ -171,10 +172,10 @@ pub fn int(n: i64) -> Expression {
 /// expression contexts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexedIdentifier {
-    /// Register name.
+    /// Register or variable name.
     pub name: String,
-    /// Index into the register.
-    pub index: Expression,
+    /// Optional index; `None` for bare-name references.
+    pub index: Option<Expression>,
 }
 
 /// Gate modifiers supported by the emitter.
@@ -297,11 +298,21 @@ pub fn index_expr(name: impl Into<String>, idx: i64) -> Expression {
     }
 }
 
-/// Convenience constructor for a register-index target.
+/// Convenience constructor for a register-index reference,
+/// `<name>[<idx>]`.
 pub fn indexed_ident(name: impl Into<String>, idx: i64) -> IndexedIdentifier {
     IndexedIdentifier {
         name: name.into(),
-        index: Expression::Integer(idx),
+        index: Some(Expression::Integer(idx)),
+    }
+}
+
+/// Convenience constructor for a bare-name reference (no index),
+/// e.g. a scalar classical variable on the LHS of an assignment.
+pub fn ident(name: impl Into<String>) -> IndexedIdentifier {
+    IndexedIdentifier {
+        name: name.into(),
+        index: None,
     }
 }
 
@@ -356,7 +367,14 @@ mod tests {
         assert!(matches!(e, Expression::Index { .. }));
         let id = indexed_ident("q", 3);
         assert_eq!(id.name, "q");
-        assert_eq!(id.index, Expression::Integer(3));
+        assert_eq!(id.index, Some(Expression::Integer(3)));
+    }
+
+    #[test]
+    fn ident_helper_produces_bare_indexed_identifier() {
+        let id = ident("x");
+        assert_eq!(id.name, "x");
+        assert_eq!(id.index, None);
     }
 
     #[test]
@@ -397,6 +415,18 @@ mod tests {
                     target: indexed_ident("c", 0),
                 },
                 Statement::QuantumReset(indexed_ident("q", 0)),
+                Statement::IntDeclaration {
+                    name: "k".into(),
+                    init: Expression::Integer(0),
+                },
+                Statement::Assignment {
+                    target: ident("k"),
+                    value: Expression::Integer(1),
+                },
+                Statement::Assignment {
+                    target: indexed_ident("c", 0),
+                    value: Expression::Boolean(true),
+                },
                 Statement::BranchingStatement {
                     condition: Expression::Boolean(true),
                     if_block: vec![],
