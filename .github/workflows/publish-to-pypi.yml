@@ -36,7 +36,7 @@ jobs:
           allowed-conclusions: success
 
       - name: Download wheel artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           merge-multiple: true
@@ -45,7 +45,7 @@ jobs:
           run-id: ${{ github.run_id }}
 
       - name: Download sdist artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: sdist
           path: dist
