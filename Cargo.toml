@@ -20,7 +20,7 @@ default-members = [
 [workspace.package]
 version = "0.1.0-dev0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.85"
 license = "Apache-2.0"
 authors = ["Amazon Web Services"]
 homepage = "https://github.com/amazon-braket/qirtoqasm"

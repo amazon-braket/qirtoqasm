@@ -45,7 +45,7 @@ fn translate(qir_text: &str, producer: Option<&str>) -> PyResult<String> {
 fn module_init(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     m.add("__version__", core::VERSION)?;
-    m.add("QirToQasmError", py.get_type_bound::<QirToQasmError>())?;
+    m.add("QirToQasmError", py.get_type::<QirToQasmError>())?;
     m.add_function(wrap_pyfunction!(translate, m)?)?;
     Ok(())
 }
