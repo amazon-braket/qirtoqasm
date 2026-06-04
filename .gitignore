@@ -1,0 +1,59 @@
+# ---- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Rust / Cargo ----------------------------------------------------------
+# Build artifacts; large and always regeneratable.
+target/
+# Lockfile: keep committed for reproducible builds of the workspace
+# binaries and CI. Do NOT ignore it.
+# (Cargo.lock is tracked.)
+
+# ---- Maturin / Python extension --------------------------------------------
+# Compiled extension modules dropped next to the Python sources during
+# `maturin develop`.
+python/qirtoqasm/_qirtoqasm_native*.so
+python/qirtoqasm/_qirtoqasm_native*.pyd
+python/qirtoqasm/_qirtoqasm_native*.dylib
+*.whl
+
+# ---- cargo-llvm-cov --------------------------------------------------------
+# Per-run coverage artifacts.
+lcov.info
+llvm-cov-target/
+*.profraw
+*.profdata
+
+# ---- CMake -----------------------------------------------------------------
+# Top-level build output. The Cargo-driven rust libs under target/ are
+# already ignored above; these cover pure CMake-generated noise.
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+/build/
+/build-*/
+
+# ---- IDEs / OS -------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+
+# ---- Temp files from helper scripts ----------------------------------------
+/tmp/qirtoqasm-*.log

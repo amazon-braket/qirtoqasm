@@ -1,0 +1,91 @@
+# Main CI pipeline, driven by tox.
+#
+# build     — cargo build/test, lint, tox unit-tests. No Braket / Q# /
+#             CUDA-Q. 3 OS × 3 Py.
+# msrv      — rust 1.75 build + test on Ubuntu.
+#
+# Coverage, integ-* (braket / qsharp / cudaq / golden), and the C/C++
+# smoke jobs are added in the PRs that ship their respective code.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+      - feature/**
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Build tier. No Braket / Q# / CUDA-Q. Every OS × every supported Python.
+  build:
+    name: Build (${{ matrix.os }} / py ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install tox
+        run: pip install tox
+
+      # `qirtoqasm-py` is excluded from workspace `default-members` because
+      # its pyo3 cdylib needs maturin-supplied link flags. Plain
+      # `cargo build` uses the default set; maturin builds the extension.
+      - name: cargo build (default members)
+        run: cargo build --locked
+
+      - name: cargo test (core + ffi)
+        run: cargo test -p qirtoqasm-core -p qirtoqasm-ffi --locked
+
+      - name: cargo fmt --check
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        run: cargo clippy -p qirtoqasm-core -p qirtoqasm-ffi --all-targets -- -D warnings
+
+      - name: Run tox unit-tests
+        run: tox -e unit-tests -- -q
+
+  # MSRV enforcement: the declared `rust-version = 1.75` must still build.
+  msrv:
+    name: MSRV (rust 1.75)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.75"
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo build
+        run: cargo build --locked
+      - name: cargo test (core + ffi)
+        run: cargo test -p qirtoqasm-core -p qirtoqasm-ffi --locked

@@ -1,0 +1,45 @@
+# When ``vars.FROZEN == 'true'``, PR merges are blocked except for
+# critical fixes (``fix(critical):`` PR titles) and branches matching
+# ``vars.UNFROZEN_PREFIX``. Set both vars under Settings → Secrets and
+# variables → Actions → Variables.
+
+name: Code Freeze
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FROZEN: ${{ vars.FROZEN }}
+  UNFROZEN_PREFIX: ${{ vars.UNFROZEN_PREFIX }}
+
+jobs:
+  check-pr-frozen-status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch PR data and check if merge allowed
+        if: env.FROZEN == 'true'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # If it's not a critical fix
+          if ! [[ "$PR_TITLE" == fix(critical):* ]]; then
+            # And an unfrozen prefix is configured
+            if [[ -n "${UNFROZEN_PREFIX:-}" ]]; then
+              # Check the branch matches the unfrozen prefix
+              if [[ "$BRANCH_NAME" != $UNFROZEN_PREFIX* ]]; then
+                echo "Error: You can only merge from branches that start with '$UNFROZEN_PREFIX', or PRs titled with prefix 'fix(critical): '."
+                exit 1
+              fi
+            else
+              # Repo is fully frozen
+              echo "Error: You can only merge PRs titled with prefix 'fix(critical): '."
+              exit 1
+            fi
+          fi

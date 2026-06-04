@@ -1,0 +1,36 @@
+# Keep GitHub Actions and Cargo dependencies current.
+#
+# Both the rust toolchain (via `cargo update`) and the GitHub Actions
+# references get weekly update PRs; the actions group keeps CI hardened
+# against action-version supply-chain drift.
+
+version: 2
+updates:
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: infra
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: infra
+    # Group minor/patch updates into a single PR; major bumps still open
+    # individual PRs because they may require code changes.
+    groups:
+      rust-minor:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: infra

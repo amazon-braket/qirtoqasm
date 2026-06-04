@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/qirtoqasm-core",
+    "crates/qirtoqasm-ffi",
+    "crates/qirtoqasm-py",
+]
+# `qirtoqasm-py` is intentionally excluded from `default-members`. Its
+# cdylib crate type depends on pyo3 link flags that are only supplied
+# by `maturin build`; a plain `cargo build` / `cargo build --workspace`
+# that tried to link it standalone would fail on macOS with undefined
+# Python symbols. Tools that want to build the PyO3 extension use
+# `maturin` directly; everything else (cargo build/test/clippy) works
+# on the default set.
+default-members = [
+    "crates/qirtoqasm-core",
+    "crates/qirtoqasm-ffi",
+]
+
+[workspace.package]
+version = "0.1.0-dev0"
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0"
+authors = ["Amazon Web Services"]
+homepage = "https://github.com/amazon-braket/qirtoqasm"
+repository = "https://github.com/amazon-braket/qirtoqasm"
+
+[workspace.dependencies]
+qirtoqasm-core = { path = "crates/qirtoqasm-core" }
+thiserror = "=1.0.50"
+indexmap = "=2.2.6"
+pyo3 = { version = "=0.21.2", features = ["extension-module", "abi3-py311"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

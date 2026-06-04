@@ -1,0 +1,44 @@
+# qirtoqasm-config.cmake.in
+#
+# Used by `configure_package_config_file` at build time. Downstream
+# consumers use this via `find_package(qirtoqasm REQUIRED)`.
+#
+# The Rust core is built outside of CMake (by `cargo`) and the resulting
+# libraries are installed as plain files by the top-level `CMakeLists.txt`.
+# That means we cannot use `install(EXPORT ...)` to emit a targets file.
+# Instead, we reconstruct the imported targets here from the installation
+# layout. The path substitution tracks wherever the package ends up being
+# installed (or relocated to) because we compute paths relative to
+# PACKAGE_PREFIX_DIR, which is derived at find_package() time.
+
+@PACKAGE_INIT@
+
+set_and_check(_qirtoqasm_includedir "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+set_and_check(_qirtoqasm_libdir     "@PACKAGE_CMAKE_INSTALL_LIBDIR@")
+
+set(_qirtoqasm_shared_name "@QIRTOQASM_SHARED_NAME@")
+set(_qirtoqasm_static_name "@QIRTOQASM_STATIC_NAME@")
+
+# Shared library (default, aliased as qirtoqasm::qirtoqasm)
+if(NOT TARGET qirtoqasm::qirtoqasm_shared)
+    add_library(qirtoqasm::qirtoqasm_shared SHARED IMPORTED)
+    set_target_properties(qirtoqasm::qirtoqasm_shared PROPERTIES
+        IMPORTED_LOCATION "${_qirtoqasm_libdir}/${_qirtoqasm_shared_name}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_qirtoqasm_includedir}"
+    )
+endif()
+
+if(NOT TARGET qirtoqasm::qirtoqasm)
+    add_library(qirtoqasm::qirtoqasm ALIAS qirtoqasm::qirtoqasm_shared)
+endif()
+
+# Static library (opt-in as qirtoqasm::qirtoqasm_static)
+if(NOT TARGET qirtoqasm::qirtoqasm_static)
+    add_library(qirtoqasm::qirtoqasm_static STATIC IMPORTED)
+    set_target_properties(qirtoqasm::qirtoqasm_static PROPERTIES
+        IMPORTED_LOCATION "${_qirtoqasm_libdir}/${_qirtoqasm_static_name}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_qirtoqasm_includedir}"
+    )
+endif()
+
+check_required_components(qirtoqasm)

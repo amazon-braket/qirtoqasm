@@ -1,0 +1,25 @@
+# sdist manifest. Maturin drives the build; these directives shape
+# the Python-visible metadata.
+
+include *.md
+include LICENSE
+include NOTICE
+include CODEOWNERS
+include tox.ini
+include .coveragerc
+include rust-toolchain.toml
+
+recursive-include python *.py *.pyi
+recursive-include python py.typed
+
+recursive-include test *.py *.ll *.qasm *.qs *.txt
+
+recursive-include scripts *.py
+
+recursive-include doc *.py *.rst *.txt Makefile
+
+recursive-include include *.h *.hpp
+
+recursive-include cmake *.cmake *.cmake.in *.cpp *.in
+
+recursive-include crates *.rs *.toml
