@@ -7,9 +7,6 @@
 use indexmap::IndexMap;
 
 /// Classification of what a QIR intrinsic lowers to.
-///
-/// Variants correspond 1:1 to the Python `GateBuilder` / `MeasurementBuilder` /
-/// `ResetBuilder` / `ReadResultBuilder` / `RecordOutputBuilder` classes.
 #[derive(Debug, Clone)]
 pub enum FunctionBuilder {
     /// A gate application: `<gate_name>(args...) qubits...;`, optionally
@@ -23,7 +20,7 @@ pub enum FunctionBuilder {
     /// A single-qubit measurement: `c[i] = measure q[j];`.
     Measurement,
     /// Measure-and-reset (`__quantum__qis__mresetz__body`): emits
-    /// `c[i] = measure q[j]; reset q[j];`. See AGENTS.md.
+    /// `c[i] = measure q[j]; reset q[j];`.
     MeasureAndReset,
     /// A qubit reset: `reset q[i];`.
     Reset,
@@ -33,12 +30,12 @@ pub enum FunctionBuilder {
     /// Drops the call (emits no OQ3 statements). Used for the
     /// `__quantum__rt__*_record_output` / `__quantum__rt__initialize` family.
     RecordOutputNoop,
-    /// CUDA-Q's variadic
-    /// `generalizedInvokeWithRotationsControlsTargets` intrinsic.
-    /// Delegates to a specialized builder that resolves the inner
-    /// `__quantum__qis__<op>__ctl` function pointer and emits the
-    /// matching Braket-native multi-controlled gate (`cnot`, `ccnot`,
-    /// `cy`, `cz`, `cswap`). `numRotations > 0` is not yet supported.
+    /// Variadic `generalizedInvokeWithRotationsControlsTargets`
+    /// intrinsic. Delegates to a specialized builder that resolves
+    /// the inner `__quantum__qis__<op>__ctl` function pointer and
+    /// emits the matching Braket-native multi-controlled gate
+    /// (`cnot`, `ccnot`, `cy`, `cz`, `cswap`). `numRotations > 0`
+    /// is not yet supported.
     GeneralizedControlled,
 }
 
@@ -92,12 +89,21 @@ impl Profile {
 
 /// Construct the default `BaseProfile` registrations.
 ///
-/// The set mirrors the current Python `BaseProfile` exactly.
+/// Each entry maps a QIR function name (the `__quantum__qis__*` and
+/// `__quantum__rt__*` intrinsics that QIR producers emit) to the
+/// builder that lowers it to Braket-compatible OpenQASM 3. The gate
+/// names in the table below (`cnot`, `ccnot`, `xx` / `yy` / `zz`,
+/// `prx`, …) are the Braket-native spellings — not the OpenQASM
+/// `stdgates.inc` names — so the emitted program is accepted by
+/// `braket.ir.openqasm.Program` without any further rewriting.
 pub fn base_profile() -> Profile {
     let mut p = Profile::new("base_profile");
 
-    // (qir-name suffix, emitted-gate name, adjoint flag).
-    // The QIR fully-qualified name is `__quantum__qis__<suffix>`.
+    // Each tuple is (QIR-name suffix, Braket-OQ3 gate name, adjoint flag).
+    // The full QIR name is `__quantum__qis__<suffix>`. Where the
+    // Braket name differs from the QIR suffix, the comment notes
+    // why — usually because Braket uses a Braket-native alias rather
+    // than the OpenQASM stdgates.inc name.
     const GATES: &[(&str, &str, bool)] = &[
         // Self-adjoint single-qubit Cliffords.
         ("h__body", "h", false),
@@ -127,7 +133,7 @@ pub fn base_profile() -> Profile {
         // Toffoli aliases both emit `ccnot`.
         ("ccx__body", "ccnot", false),
         ("ccnot__body", "ccnot", false),
-        // Quantinuum-native phased-X → Braket `prx`.
+        // Two-parameter phased-X rotation: QIR phasedx → Braket prx.
         ("phasedx__body", "prx", false),
     ];
     for (suffix, gate, adjoint) in GATES {
@@ -152,13 +158,14 @@ pub fn base_profile() -> Profile {
         ),
         // Reset.
         ("__quantum__qis__reset__body", FunctionBuilder::Reset),
-        // Read-result (Adaptive Profile), with Microsoft Q# alias.
+        // Read-result (Adaptive Profile); both the QIS-namespaced
+        // and runtime-namespaced spellings are accepted.
         (
             "__quantum__qis__read_result__body",
             FunctionBuilder::ReadResult,
         ),
         ("__quantum__rt__read_result", FunctionBuilder::ReadResult),
-        // CUDA-Q's variadic multi-controlled dispatch intrinsic.
+        // Variadic multi-controlled dispatch intrinsic.
         (
             "generalizedInvokeWithRotationsControlsTargets",
             FunctionBuilder::GeneralizedControlled,
@@ -168,15 +175,15 @@ pub fn base_profile() -> Profile {
         p.register(*name, builder.clone());
     }
 
-    // Runtime record-output no-ops + non-quantum CUDA-Q helpers.
+    // Runtime record-output no-ops + non-quantum allocator helpers.
     // `llvm.memcpy` uses prefix matching (see `get_builder`).
     for n in [
         "__quantum__rt__result_record_output",
         "__quantum__rt__array_record_output",
         "__quantum__rt__tuple_record_output",
         "__quantum__rt__integer_record_output",
-        // Q# spells it `int_record_output`; QIR-Alliance drafts use
-        // `integer_record_output`. Accept both.
+        // Some producers spell this `int_record_output`; QIR-Alliance
+        // drafts use `integer_record_output`. Accept both.
         "__quantum__rt__int_record_output",
         "__quantum__rt__bool_record_output",
         "__quantum__rt__double_record_output",
@@ -274,7 +281,7 @@ mod tests {
             p.get_builder("__quantum__rt__result_record_output"),
             Some(FunctionBuilder::RecordOutputNoop)
         ));
-        // Both Q#'s `int_record_output` and the newer-spec
+        // Both the `int_record_output` spelling and the newer-spec
         // `integer_record_output` must be accepted.
         assert!(matches!(
             p.get_builder("__quantum__rt__int_record_output"),
