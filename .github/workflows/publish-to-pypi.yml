@@ -27,7 +27,7 @@ jobs:
       id-token: write
     steps:
       - name: Wait for wheels.yml artifacts
-        uses: lewagon/wait-on-check-action@v1.3.4
+        uses: lewagon/wait-on-check-action@v1.7.0
         with:
           ref: ${{ github.sha }}
           check-name: sdist

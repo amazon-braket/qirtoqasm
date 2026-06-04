@@ -1,12 +1,10 @@
 [toolchain]
 # Pinned to a known-good stable version rather than rolling `stable`
 # so that developer machines, maturin / cibuildwheel runs, and CI all
-# agree on Rust lints and format rules. Bumping this is a deliberate
-# change that gets its own PR (and may surface new clippy / rustfmt
-# findings that need to be addressed at the same time).
+# agree on Rust lints and format rules.
 #
 # MSRV is enforced separately by the `msrv` job in ci.yml, which
-# runs against the `rust-version = "1.75"` declared in Cargo.toml.
-channel = "1.82.0"
+# runs against the rust-version declared in Cargo.toml.
+channel = "1.96.0"
 components = ["rustfmt", "clippy"]
 profile = "default"
