@@ -1,6 +1,6 @@
 # Pinned sphinx stack for the Read the Docs build. The same versions are
 # listed in `[project.optional-dependencies].docs` so `tox -e docs`
 # and RTD stay in sync.
-sphinx>=7,<10
-sphinx-rtd-theme>=2,<4
+sphinx>=7
+sphinx-rtd-theme>=2
 sphinxcontrib-apidoc>=0.5
