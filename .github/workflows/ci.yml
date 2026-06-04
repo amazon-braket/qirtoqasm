@@ -75,15 +75,15 @@ jobs:
       - name: Run tox unit-tests
         run: tox -e unit-tests -- -q
 
-  # MSRV enforcement: the declared `rust-version = 1.75` must still build.
+  # MSRV enforcement: the declared `rust-version = 1.85` must still build.
   msrv:
-    name: MSRV (rust 1.75)
+    name: MSRV (rust 1.85)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.75"
+          toolchain: "1.85"
       - uses: Swatinem/rust-cache@v2
       - name: cargo build
         run: cargo build --locked
