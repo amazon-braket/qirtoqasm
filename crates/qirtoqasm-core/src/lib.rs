@@ -30,6 +30,7 @@
 #![warn(missing_docs)]
 
 pub mod error;
+pub mod profile;
 
 pub use error::{QirToQasmError, Result};
 
