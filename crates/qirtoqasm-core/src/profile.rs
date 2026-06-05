@@ -99,55 +99,49 @@ impl Profile {
 pub fn base_profile() -> Profile {
     let mut p = Profile::new("base_profile");
 
-    // Each tuple is (QIR-name suffix, Braket-OQ3 gate name, adjoint flag).
-    // The full QIR name is `__quantum__qis__<suffix>`. Where the
-    // Braket name differs from the QIR suffix, the comment notes
-    // why — usually because Braket uses a Braket-native alias rather
-    // than the OpenQASM stdgates.inc name.
-    const GATES: &[(&str, &str, bool)] = &[
+    // QIR gate intrinsics → Braket-native OpenQASM 3 gate names.
+    // Each row is `(full QIR function name, Braket gate name,
+    // adjoint flag)`. Where the Braket gate name differs from the
+    // QIR gate name, the inline comment notes why — usually because
+    // Braket uses a Braket-native alias rather than the OpenQASM
+    // `stdgates.inc` name.
+    const GATE_INTRINSICS: &[(&str, &str, bool)] = &[
         // Self-adjoint single-qubit Cliffords.
-        ("h__body", "h", false),
-        ("x__body", "x", false),
-        ("y__body", "y", false),
-        ("z__body", "z", false),
+        ("__quantum__qis__h__body", "h", false),
+        ("__quantum__qis__x__body", "x", false),
+        ("__quantum__qis__y__body", "y", false),
+        ("__quantum__qis__z__body", "z", false),
         // Single-qubit gates with adjoints.
-        ("s__body", "s", false),
-        ("s__adj", "s", true),
-        ("t__body", "t", false),
-        ("t__adj", "t", true),
+        ("__quantum__qis__s__body", "s", false),
+        ("__quantum__qis__s__adj", "s", true),
+        ("__quantum__qis__t__body", "t", false),
+        ("__quantum__qis__t__adj", "t", true),
         // CNOT and its `cx` alias both emit Braket-native `cnot`.
-        ("cnot__body", "cnot", false),
-        ("cx__body", "cnot", false),
+        ("__quantum__qis__cnot__body", "cnot", false),
+        ("__quantum__qis__cx__body", "cnot", false),
         // Two-qubit single-control Cliffords.
-        ("cy__body", "cy", false),
-        ("cz__body", "cz", false),
-        ("swap__body", "swap", false),
+        ("__quantum__qis__cy__body", "cy", false),
+        ("__quantum__qis__cz__body", "cz", false),
+        ("__quantum__qis__swap__body", "swap", false),
         // Single-qubit rotations.
-        ("rx__body", "rx", false),
-        ("ry__body", "ry", false),
-        ("rz__body", "rz", false),
+        ("__quantum__qis__rx__body", "rx", false),
+        ("__quantum__qis__ry__body", "ry", false),
+        ("__quantum__qis__rz__body", "rz", false),
         // Two-qubit Ising rotations: QIR rxx/ryy/rzz → Braket xx/yy/zz.
-        ("rxx__body", "xx", false),
-        ("ryy__body", "yy", false),
-        ("rzz__body", "zz", false),
+        ("__quantum__qis__rxx__body", "xx", false),
+        ("__quantum__qis__ryy__body", "yy", false),
+        ("__quantum__qis__rzz__body", "zz", false),
         // Toffoli aliases both emit `ccnot`.
-        ("ccx__body", "ccnot", false),
-        ("ccnot__body", "ccnot", false),
+        ("__quantum__qis__ccx__body", "ccnot", false),
+        ("__quantum__qis__ccnot__body", "ccnot", false),
         // Two-parameter phased-X rotation: QIR phasedx → Braket prx.
-        ("phasedx__body", "prx", false),
+        ("__quantum__qis__phasedx__body", "prx", false),
     ];
-    for (suffix, gate, adjoint) in GATES {
-        p.register(
-            format!("__quantum__qis__{suffix}"),
-            FunctionBuilder::Gate {
-                gate_name: (*gate).into(),
-                adjoint: *adjoint,
-            },
-        );
-    }
 
-    // (fully-qualified qir name, builder kind) for non-Gate entries.
-    let non_gates: &[(&str, FunctionBuilder)] = &[
+    // QIR non-gate intrinsics that lower to specialized OQ3 statement
+    // shapes (measurement, reset, read-result, multi-controlled dispatch).
+    // Each row is `(full QIR function name, builder)`.
+    const NON_GATE_INTRINSICS: &[(&str, FunctionBuilder)] = &[
         // Measurement (`mz` / `m` aliases).
         ("__quantum__qis__mz__body", FunctionBuilder::Measurement),
         ("__quantum__qis__m__body", FunctionBuilder::Measurement),
@@ -171,13 +165,11 @@ pub fn base_profile() -> Profile {
             FunctionBuilder::GeneralizedControlled,
         ),
     ];
-    for (name, builder) in non_gates {
-        p.register(*name, builder.clone());
-    }
 
-    // Runtime record-output no-ops + non-quantum allocator helpers.
-    // `llvm.memcpy` uses prefix matching (see `get_builder`).
-    for n in [
+    // QIR runtime record-output no-ops + non-quantum allocator helpers
+    // that are dropped from the emitted OQ3. `llvm.memcpy` uses prefix
+    // matching (see [`Profile::get_builder`]).
+    const NOOP_INTRINSICS: &[&str] = &[
         "__quantum__rt__result_record_output",
         "__quantum__rt__array_record_output",
         "__quantum__rt__tuple_record_output",
@@ -191,8 +183,22 @@ pub fn base_profile() -> Profile {
         "malloc",
         "free",
         "llvm.memcpy",
-    ] {
-        p.register(n, FunctionBuilder::RecordOutputNoop);
+    ];
+
+    for (qir_name, gate_name, adjoint) in GATE_INTRINSICS {
+        p.register(
+            *qir_name,
+            FunctionBuilder::Gate {
+                gate_name: (*gate_name).into(),
+                adjoint: *adjoint,
+            },
+        );
+    }
+    for (qir_name, builder) in NON_GATE_INTRINSICS {
+        p.register(*qir_name, builder.clone());
+    }
+    for qir_name in NOOP_INTRINSICS {
+        p.register(*qir_name, FunctionBuilder::RecordOutputNoop);
     }
 
     p
