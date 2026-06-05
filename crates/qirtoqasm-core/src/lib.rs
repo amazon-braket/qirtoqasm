@@ -31,6 +31,7 @@
 
 pub mod error;
 pub mod ir;
+pub mod oq3;
 
 #[cfg(test)]
 pub(crate) mod test_support;
