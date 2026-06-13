@@ -2,8 +2,8 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-//! Structural CFG reduction: collapse a list of [`BlockLowering`]s into
-//! a single sequence of OpenQASM statements.
+//! Structural control-flow-graph (CFG) reduction: collapse a list of
+//! [`BlockLowering`]s into a single sequence of OpenQASM statements.
 //!
 //! Implements a minimal directed-graph type keyed by block name rather
 //! than pulling in `petgraph`.
@@ -222,6 +222,7 @@ impl Cfg {
 // Reduction rules
 // ---------------------------------------------------------------------------
 
+/// Fold A → B into A when A has one successor and B has one predecessor.
 fn reduce_sequential(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>) -> bool {
     let mut candidates: Vec<(String, String)> = Vec::new();
     for a in cfg.node_snapshot() {
@@ -238,6 +239,8 @@ fn reduce_sequential(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>) -
     false
 }
 
+/// Fold the LLVM short-circuit `&&`/`||` lowering A → {B, C}, B → C
+/// (B body-empty, C's condition a top-level `&&`/`||`) into A.
 fn reduce_short_circuit_phi(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>) -> bool {
     let nodes = cfg.node_snapshot();
     for a in &nodes {
@@ -296,6 +299,9 @@ fn reduce_short_circuit_phi(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLower
     false
 }
 
+/// True iff `expr` is a top-level `&&`/`||`. Used to gate
+/// [`reduce_short_circuit_phi`] on conditions actually produced by
+/// short-circuit lowering.
 fn is_compound_boolean(expr: &Expression) -> bool {
     matches!(
         expr,
@@ -306,6 +312,8 @@ fn is_compound_boolean(expr: &Expression) -> bool {
     )
 }
 
+/// Fold a self-edge A → A (with one exit) into `while (cond) { A's body }`,
+/// negating `cond` when the back-edge is on the false branch.
 fn reduce_self_loop(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>) -> bool {
     for node in cfg.node_snapshot() {
         if !cfg.has_edge(&node, &node) {
@@ -343,6 +351,8 @@ fn reduce_self_loop(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>) ->
     false
 }
 
+/// Fold the diamond A → {T, E}, T → M, E → M into `if (cond) { T } else { E }`
+/// on A, leaving A → M.
 fn reduce_if_else(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>) -> bool {
     for a in cfg.node_snapshot() {
         if cfg.out_degree(&a) != 2 {
@@ -392,6 +402,9 @@ fn reduce_if_else(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>) -> b
     false
 }
 
+/// Fold the triangle A → {T, M}, T → M (or the symmetric else-only shape)
+/// into `if (cond) { T }` on A, negating `cond` when the then-block is on
+/// the false branch. Leaves A → M.
 fn reduce_if_no_else(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>) -> bool {
     for a in cfg.node_snapshot() {
         if cfg.out_degree(&a) != 2 {
@@ -441,6 +454,9 @@ fn reduce_if_no_else(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>) -
     false
 }
 
+/// Fold a single-exit while pattern A → {B, exit}, B → A into
+/// `while (cond) { B }` on A, negating `cond` when the body is on
+/// the false branch.
 fn reduce_while(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>) -> bool {
     for a in cfg.node_snapshot() {
         if cfg.out_degree(&a) != 2 {
@@ -497,6 +513,8 @@ fn reduce_while(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>) -> boo
 // Low-level helpers
 // ---------------------------------------------------------------------------
 
+/// Append B's statements onto A and inherit B's branching/targets, then
+/// drop B from the graph. Used by [`reduce_sequential`].
 fn merge_sequential(cfg: &mut Cfg, map: &mut BTreeMap<String, BlockLowering>, a: &str, b: &str) {
     let b_block = map.remove(b).unwrap();
     let a_block = map.get_mut(a).unwrap();
