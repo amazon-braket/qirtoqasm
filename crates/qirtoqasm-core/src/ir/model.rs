@@ -83,7 +83,9 @@ pub enum Instruction {
     Icmp(Icmp),
     /// `%result = xor <ty> <lhs>, <rhs>`, `%result = and <ty> <lhs>, <rhs>`,
     /// or `%result = or <ty> <lhs>, <rhs>`. The `op` field carries which
-    /// of the three the source spelled.
+    /// of the three the source spelled. Split out from [`Instruction::IntArith`]
+    /// because i1-bitwise ops lower to Boolean expressions rather than
+    /// arithmetic ones.
     BinaryI1 {
         /// SSA id assigned by this instruction.
         result: String,
