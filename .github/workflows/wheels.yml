@@ -39,7 +39,7 @@ jobs:
           - { os: windows-latest, arch: x86_64,  cibw_arch: AMD64 }
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -54,7 +54,7 @@ jobs:
           platforms: arm64
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v3.4.1
+        uses: pypa/cibuildwheel@v4.1.0
         env:
           CIBW_ARCHS: ${{ matrix.cibw_arch }}
           # ``cp311-*`` alone covers 3.11 / 3.12 / 3.13 via abi3.
@@ -80,7 +80,7 @@ jobs:
     name: sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
