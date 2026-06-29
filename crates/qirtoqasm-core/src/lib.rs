@@ -29,6 +29,7 @@
 #![deny(rust_2018_idioms)]
 #![warn(missing_docs)]
 
+pub mod boolean;
 pub mod cfg;
 pub mod error;
 pub mod ir;
