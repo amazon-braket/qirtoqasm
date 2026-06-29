@@ -2,7 +2,8 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-//! Mutable translator state: qubit/result register sizing and SSA bindings.
+//! Mutable translator state carried through a single QIR → OpenQASM
+//! translation.
 
 use std::collections::HashMap;
 
@@ -16,7 +17,68 @@ pub const QUBIT_REGISTER: &str = "q";
 /// OpenQASM register identifier we emit for classical bits.
 pub const RESULT_REGISTER: &str = "c";
 
-/// Lowering state shared across builders during one translation.
+/// The translator's notebook. As the translator walks a QIR program
+/// instruction by instruction, it writes facts down here so it can
+/// look them up when later instructions need them.
+///
+/// QIR is LLVM IR, so each value the program computes has a unique
+/// name like `%cond`, `%tmp.1`, or `%1`. These are called SSA values:
+/// "SSA" stands for *Static Single Assignment*, which just means each
+/// name is assigned exactly once and never reused. When the translator
+/// reaches an instruction that consumes a previously computed value,
+/// it needs to substitute the OpenQASM equivalent for that name. Most
+/// of this struct exists to make that lookup possible.
+///
+/// Three independent things live here:
+///
+/// 1. **Quantum register sizing** (`max_qubit_index`,
+///    `max_result_index`). Qubits and classical result bits are not
+///    referred to by name in QIR — they are referred to by integer
+///    index, e.g. `%Qubit* inttoptr (i64 3 to %Qubit*)` means
+///    "qubit number 3". So there is nothing to bind by name; we just
+///    remember the largest index we have seen. At the end of the
+///    translation, that tells us how big to make the OpenQASM
+///    register declarations at the top of the program
+///    (`qubit[N] q;` and `bit[N] c;`).
+///
+/// 2. **Classical value bindings** (`ssa`). A map from an SSA name
+///    to the OpenQASM expression that should replace it. This is the
+///    main "symbol table" in the traditional sense: every classical
+///    value the program computes lands here, including
+///    - comparisons (`%cond = icmp eq i32 %x, 0`),
+///    - boolean combinations (`and i1`, `or i1`, `xor i1`),
+///    - integer arithmetic (`add`, `sub`, `mul`,
+///      integer-cascade `select`),
+///    - `phi` merges of all of the above,
+///    - measurement readouts (`__quantum__rt__read_result__body`,
+///      which binds the SSA name to the corresponding `c[i]` bit).
+///
+///    When a later instruction uses one of these as an operand, the
+///    lowering code looks the name up here and substitutes the bound
+///    expression into whatever OpenQASM statement it is building.
+///    The map key is just the LLVM name (`cond`, `tmp.1`, `1`, …);
+///    [`ssa_key`] extracts that name from the instruction text in
+///    the few places the parser does not already have it.
+///
+/// 3. **Stack-slot scratch** (`alloca_alias`, `alloca_slot`). Some
+///    QIR producers route a scalar value — a rotation angle, a loop
+///    bound, etc. — through an LLVM stack slot rather than passing
+///    it directly: `alloca` reserves the slot, `store` puts a value
+///    in, and a later `load` reads it back out. These two maps track
+///    which pointer SSA values refer to which slot, and what value
+///    each slot currently holds, so the eventual `load` can produce
+///    an inline OpenQASM constant instead of an opaque pointer
+///    dereference. Once the `load` resolves, its result is recorded
+///    in `ssa` like any other classical binding.
+///
+/// One thing the table deliberately does **not** track is "function
+/// input parameters". The QIR Base and Adaptive Profiles both define
+/// the entry point as `@main()` with no parameters, so every
+/// classical value the program uses is either a literal in the QIR
+/// text (e.g. `Operand::ConstFloat(0.5)` passed straight through as
+/// a rotation angle) or appears as one of the bindings above. There
+/// is no third "user parameter" category that would need its own
+/// slot in this struct.
 #[derive(Debug, Default)]
 pub struct SymbolTable {
     /// Largest referenced qubit index, or -1 if no qubits are used.
