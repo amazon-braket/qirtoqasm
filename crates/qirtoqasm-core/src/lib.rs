@@ -35,6 +35,7 @@ pub mod error;
 pub mod ir;
 pub mod oq3;
 pub mod profile;
+pub mod signatures;
 pub mod symbols;
 
 #[cfg(test)]
