@@ -76,9 +76,9 @@ pub fn extract_signatures(qir_source: &str) -> Result<SignatureTable> {
     for raw_line in qir_source.lines() {
         let line = raw_line.trim_end();
         let stripped = line.trim_start();
-        let keyword = if stripped.starts_with("declare") {
+        let keyword = if starts_with_keyword(stripped, "declare") {
             "declare"
-        } else if stripped.starts_with("define") {
+        } else if starts_with_keyword(stripped, "define") {
             "define"
         } else {
             continue;
@@ -147,9 +147,11 @@ fn parse_signature_line(line: &str, keyword: &str) -> Result<FunctionSignature> 
     }
 
     // Return type is the next whitespace-delimited token, OR a
-    // brace-enclosed struct type like `{ i1*, i64 }`.
+    // brace-enclosed struct type like `{ i1*, i64 }`. Struct types
+    // may be nested (`{ { i1 }, i64 }`), so we track brace depth
+    // rather than stopping at the first `}`.
     let (return_type_raw, rest) = if rest.starts_with('{') {
-        let close = rest.find('}').ok_or_else(|| {
+        let close = matching_close_brace(rest).ok_or_else(|| {
             QirToQasmError::syntax(format!("unclosed struct return type: {line:?}"))
         })?;
         (&rest[..=close], rest[close + 1..].trim_start())
@@ -290,10 +292,13 @@ fn parse_param_list(src: &str) -> Result<(Vec<String>, bool)> {
         // If the parameter type is an inline struct literal like
         // `{ double*, i64 } %0`, the whitespace-split produces tokens
         // that individually look nothing like types. Detect the `{`
-        // prefix and carve the struct type out wholesale.
+        // prefix and carve the struct type out wholesale. Struct
+        // types may be nested, so we track brace depth from the
+        // leading `{` rather than scanning for the last `}` in the
+        // chunk.
         let p_stripped = strip_leading_attrs(p, &attrs);
         let ty = if p_stripped.starts_with('{') {
-            match p_stripped.rfind('}') {
+            match matching_close_brace(p_stripped) {
                 Some(end) => p_stripped[..=end].to_string(),
                 None => {
                     return Err(QirToQasmError::syntax(format!(
@@ -321,13 +326,19 @@ fn parse_param_list(src: &str) -> Result<(Vec<String>, bool)> {
 
 /// Normalise an LLVM type token to our canonical form.
 ///
-/// Rules (must match `signatures.py::_canonicalize_type`):
+/// Rules:
 ///   * `%Qubit*` → `"Qubit"`    (typed struct pointer → struct name)
 ///   * `%"Qubit"*` → `"Qubit"`  (quoted identified struct pointer)
 ///   * `%Qubit` → `"Qubit"`     (identified struct without pointer)
 ///   * `%"Qubit"` → `"Qubit"`   (ditto, quoted)
 ///   * `ptr` → `"ptr"`          (opaque pointer passes through)
 ///   * `i1`, `i32`, `i64`, `double`, `float`, `half`, `void` → passthrough
+///   * `i32*`, `double*`, etc. → the primitive name (trailing `*`
+///     stripped). The signature table classifies parameter shape for
+///     qubit/result/classical-scalar dispatch and does not preserve
+///     pointer-vs-value distinctions on primitives, since those only
+///     ever appear inside function bodies, not in the declare/define
+///     signatures the table indexes.
 pub fn canonicalize_type(raw: &str) -> Result<String> {
     let token = raw.trim();
     if token.is_empty() {
@@ -358,11 +369,11 @@ pub fn canonicalize_type(raw: &str) -> Result<String> {
     if is_known_primitive(core) || is_integer_type(core) {
         return Ok(core.to_string());
     }
-    // LLVM struct-by-value types, e.g. `{ double*, i64 }` (cudaq's
-    // list-typed kernel parameter lowering). We never treat these as
-    // qubit/result operands; canonicalise to the literal "struct" so
-    // the signature stays parseable and downstream dispatch doesn't
-    // confuse them with anything else.
+    // LLVM struct-by-value types, e.g. `{ double*, i64 }` (the
+    // list-typed kernel parameter lowering some producers emit). We
+    // never treat these as qubit/result operands; canonicalise to the
+    // literal "struct" so the signature stays parseable and downstream
+    // dispatch doesn't confuse them with anything else.
     if core.starts_with('{') && core.ends_with('}') {
         return Ok("struct".to_string());
     }
@@ -385,6 +396,41 @@ fn is_known_primitive(s: &str) -> bool {
         s,
         "void" | "double" | "float" | "half" | "ptr" | "bfloat" | "fp128"
     )
+}
+
+/// Whether `s` starts with the keyword `kw` followed by a word
+/// boundary (ASCII whitespace or end of string). Prevents
+/// false-matches on lookalikes such as `declareSomething` or
+/// `define_foo` that share a prefix with the real `declare` /
+/// `define` keywords but are unrelated identifiers, while still
+/// recognising a bare `declare` / `define` with no trailing content
+/// as a (malformed) signature line worth surfacing as a parse error
+/// rather than silently skipping.
+fn starts_with_keyword(s: &str, kw: &str) -> bool {
+    s.strip_prefix(kw)
+        .map(|rest| rest.bytes().next().is_none_or(|b| b.is_ascii_whitespace()))
+        .unwrap_or(false)
+}
+
+/// Given a string that begins with `{`, return the byte index of the
+/// matching closing `}` (depth-aware) or `None` if no match exists.
+/// Used to carve out brace-enclosed struct types — including nested
+/// shapes like `{ { i1 }, i64 }` — without bailing at the first `}`.
+fn matching_close_brace(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, c) in s.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -605,5 +651,61 @@ mod more_tests_v2 {
         let src = "define { i1*, i64 @broken() {\n}\n";
         let err = extract_signatures(src).unwrap_err();
         assert!(err.to_string().contains("unclosed struct return type"));
+    }
+
+    #[test]
+    fn extract_signatures_requires_word_boundary_after_declare_or_define() {
+        // Lookalike identifiers that share a prefix with `declare` /
+        // `define` but continue without whitespace must not be routed
+        // into the signature parser. Without the word-boundary gate,
+        // a line like `declareSomething = …` would false-match and
+        // either error out as malformed or partially parse in
+        // surprising ways. Only the genuine `declare` line below
+        // should yield a signature.
+        let src = "declareSomething = something\n\
+                   defineFoo bar baz\n\
+                   declare void @real()\n";
+        let t = extract_signatures(src).unwrap();
+        assert_eq!(t.len(), 1);
+        assert!(t.contains("real"));
+    }
+
+    #[test]
+    fn extract_signatures_handles_nested_struct_return_type() {
+        // The first `}` closes the inner struct; without brace-depth
+        // tracking the parser would have stopped there and produced a
+        // malformed return-type slice. With depth tracking the outer
+        // `}` is found and the return type canonicalises to the
+        // struct-by-value sentinel.
+        let src = "declare { { i1 }, i64 } @nested()\n";
+        let t = extract_signatures(src).unwrap();
+        let sig = t.get("nested").unwrap();
+        assert_eq!(sig.return_type, "struct");
+    }
+
+    #[test]
+    fn extract_signatures_handles_nested_struct_parameter_type() {
+        // Symmetric to the return-type case: a nested-struct
+        // by-value parameter must not bail at the first inner `}`.
+        let src = "declare void @nested_param({ { i1 }, i64 } %0)\n";
+        let t = extract_signatures(src).unwrap();
+        let sig = t.get("nested_param").unwrap();
+        assert_eq!(sig.param_types, vec!["struct"]);
+    }
+
+    #[test]
+    fn canonicalize_type_collapses_pointer_primitive_to_primitive() {
+        // The signature table classifies parameter shape for
+        // qubit/result/classical-scalar dispatch; it does not preserve
+        // pointer-vs-value distinctions on primitive types, since
+        // those forms never appear in declare/define signatures the
+        // table indexes. Pin the current behaviour so a future
+        // refactor doesn't silently change it.
+        assert_eq!(canonicalize_type("i32").unwrap(), "i32");
+        assert_eq!(canonicalize_type("i32*").unwrap(), "i32");
+        assert_eq!(canonicalize_type("i64*").unwrap(), "i64");
+        assert_eq!(canonicalize_type("double").unwrap(), "double");
+        assert_eq!(canonicalize_type("double*").unwrap(), "double");
+        assert_eq!(canonicalize_type("float*").unwrap(), "float");
     }
 }
