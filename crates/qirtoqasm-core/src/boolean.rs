@@ -50,12 +50,13 @@ pub fn lower_icmp_i1(
 /// Lower an i1 binary operation (`xor` / `and` / `or`) to an OpenQASM
 /// 3 Boolean expression.
 ///
-/// `xor` accepts two shapes:
-///   * `xor i1 %x, true` (or any constant ``i1 1`` rhs) — logical NOT,
-///     lowered as `result = (x == 0)`.
-///   * `xor i1 %a, %b` with non-constant operands — integer XOR on
-///     classical bits, semantically equivalent on Booleans to inequality,
-///     lowered as `result = (a != b)`.
+/// `xor` recognises three shapes:
+///   * `xor i1 %x, true` / `xor i1 true, %x` — logical NOT, lowered
+///     as `result = (x == 0)`.
+///   * `xor i1 %x, false` / `xor i1 false, %x` — identity, `result = %x`.
+///   * `xor i1 %a, %b` with two non-constant operands — integer XOR on
+///     classical bits, semantically equivalent on Booleans to
+///     inequality, lowered as `result = (a != b)`.
 ///
 /// `and` and `or` always lower to `&&` / `||` over Boolean-normalised
 /// operands.
@@ -66,11 +67,29 @@ pub fn lower_binary_i1(
     rhs: &Operand,
     symbols: &mut SymbolTable,
 ) -> Result<()> {
-    if op == BinaryI1Op::Xor && constant_i1_value(rhs) == Some(true) {
-        // `xor i1 %x, true` → logical NOT.
-        let lhs_e = resolve_i1_operand(symbols, lhs)?;
-        symbols.record_ssa(result_key, bin(BinaryOp::Eq, lhs_e, int(0)));
-        return Ok(());
+    if op == BinaryI1Op::Xor {
+        // Constant-fold both operand orders:
+        //   xor x, true  / xor true, x   →  x == 0   (logical NOT)
+        //   xor x, false / xor false, x  →  x        (identity)
+        let lhs_const = constant_i1_value(lhs);
+        let rhs_const = constant_i1_value(rhs);
+        match (lhs_const, rhs_const) {
+            (None, Some(true)) | (Some(true), None) => {
+                let non_const = if lhs_const.is_none() { lhs } else { rhs };
+                let e = resolve_i1_operand(symbols, non_const)?;
+                symbols.record_ssa(result_key, bin(BinaryOp::Eq, e, int(0)));
+                return Ok(());
+            }
+            (None, Some(false)) | (Some(false), None) => {
+                let non_const = if lhs_const.is_none() { lhs } else { rhs };
+                let e = resolve_i1_operand(symbols, non_const)?;
+                symbols.record_ssa(result_key, e);
+                return Ok(());
+            }
+            // Both operands constant or both non-constant — fall
+            // through to the general path below.
+            _ => {}
+        }
     }
     let oq3_op = match op {
         BinaryI1Op::Xor => BinaryOp::Ne,
@@ -114,11 +133,16 @@ pub fn lower_int_arith(
 
 /// Lower `select i1 %cond, i1 %a, i1 %b` to a Boolean expression.
 ///
-/// The clang short-circuit shapes `select %c, %b, false` (`c && b`) and
-/// `select %c, true, %b` (`c || b`) are recognised and reduced; all
-/// other shapes fall through to the general `(cond && t) || (!cond && f)`
-/// expansion. Non-`i1` value types are rejected with a descriptive error
-/// since OpenQASM 3 has no classical ternary.
+/// The four short-circuit shapes are recognised and reduced:
+///   * `select %c, %rhs, false`  →  `c && rhs`
+///   * `select %c, true,  %rhs`  →  `c || rhs`
+///   * `select %c, false, %rhs`  →  `!c && rhs`
+///   * `select %c, %rhs, true`   →  `!c || rhs`
+///
+/// All other shapes fall through to the general
+/// `(cond && t) || (!cond && f)` expansion. Non-`i1` value types are
+/// rejected with a descriptive error since OpenQASM 3 has no classical
+/// ternary.
 pub fn lower_select_i1(
     result_key: &str,
     value_type: &str,
@@ -146,24 +170,47 @@ pub fn lower_select_i1(
     let t_const = constant_i1_value(true_value);
     let f_const = constant_i1_value(false_value);
 
-    // Common clang short-circuit shapes:
-    //   cond && rhs  →  `select i1 %cond, i1 %rhs, i1 false`
-    //   cond || rhs  →  `select i1 %cond, i1 true,  i1 %rhs`
-    if f_const == Some(false) && t_const.is_none() {
-        let t = resolve_i1_operand(symbols, true_value)?;
-        symbols.record_ssa(
-            result_key,
-            bin(BinaryOp::And, cond_bool, as_boolean_expression(t)),
-        );
-        return Ok(());
-    }
-    if t_const == Some(true) && f_const.is_none() {
-        let f = resolve_i1_operand(symbols, false_value)?;
-        symbols.record_ssa(
-            result_key,
-            bin(BinaryOp::Or, cond_bool, as_boolean_expression(f)),
-        );
-        return Ok(());
+    // Short-circuit shapes:
+    //   cond && rhs   ← select %c, %rhs,  false
+    //   cond || rhs   ← select %c, true,  %rhs
+    //  !cond && rhs   ← select %c, false, %rhs
+    //  !cond || rhs   ← select %c, %rhs,  true
+    match (t_const, f_const) {
+        (None, Some(false)) => {
+            let t = resolve_i1_operand(symbols, true_value)?;
+            symbols.record_ssa(
+                result_key,
+                bin(BinaryOp::And, cond_bool, as_boolean_expression(t)),
+            );
+            return Ok(());
+        }
+        (Some(true), None) => {
+            let f = resolve_i1_operand(symbols, false_value)?;
+            symbols.record_ssa(
+                result_key,
+                bin(BinaryOp::Or, cond_bool, as_boolean_expression(f)),
+            );
+            return Ok(());
+        }
+        (Some(false), None) => {
+            let f = resolve_i1_operand(symbols, false_value)?;
+            symbols.record_ssa(
+                result_key,
+                bin(BinaryOp::And, not(cond_bool), as_boolean_expression(f)),
+            );
+            return Ok(());
+        }
+        (None, Some(true)) => {
+            let t = resolve_i1_operand(symbols, true_value)?;
+            symbols.record_ssa(
+                result_key,
+                bin(BinaryOp::Or, not(cond_bool), as_boolean_expression(t)),
+            );
+            return Ok(());
+        }
+        // Both branches constant or both non-constant — fall through
+        // to the general expansion.
+        _ => {}
     }
 
     // General shape: (cond && t) || (!cond && f).
@@ -298,11 +345,12 @@ pub fn lower_select_integer(
     false_value: &Operand,
     symbols: &mut SymbolTable,
 ) -> Result<()> {
-    // The condition must be an i1 SSA (or constant) — reuse the i1
-    // resolver which already normalises bools to integer 0/1 and
-    // comparisons to boolean-producing expressions.
-    let cond_e = resolve_i1_operand(symbols, cond)?;
-    let cond_as_int = cond_as_integer_expression(cond_e);
+    // The condition must be an i1 SSA (or constant). `resolve_i1_operand`
+    // returns either a boolean-producing comparison (which evaluates to
+    // 0/1 in Braket's classical arithmetic context) or a bare 0/1
+    // integer expression — both are valid operands for the arithmetic
+    // encoding below.
+    let cond_as_int = resolve_i1_operand(symbols, cond)?;
     let t_e = resolve_integer_operand(symbols, true_value)?;
     let f_e = resolve_integer_operand(symbols, false_value)?;
 
@@ -312,22 +360,6 @@ pub fn lower_select_integer(
     let rhs = bin(BinaryOp::Mul, one_minus_cond, f_e);
     symbols.record_ssa(result_key, bin(BinaryOp::Add, lhs, rhs));
     Ok(())
-}
-
-/// Normalise an expression representing an i1 value into the integer
-/// form `0` or `1`. Boolean-producing comparisons get wrapped in
-/// `<expr> ? 1 : 0` — expressed as `<expr>` directly since OpenQASM 3
-/// treats booleans as integers in arithmetic contexts. Bare integer
-/// expressions (e.g. `c[0]`) pass through unchanged.
-fn cond_as_integer_expression(expr: Expression) -> Expression {
-    match &expr {
-        // A boolean-producing comparison like `c[0] == 1` already
-        // evaluates to 0 or 1 in Braket's classical arithmetic context.
-        Expression::Binary { op, .. } if op.is_boolean_producing() => expr,
-        // Anything else (a raw `c[i]` index, a previously-bound SSA) is
-        // already a 0-or-1 integer at this point.
-        _ => expr,
-    }
 }
 
 /// Resolve an operand appearing in a general integer-typed context
@@ -443,13 +475,8 @@ mod tests {
     }
 
     #[test]
-    fn xor_non_true_rhs_lowers_as_ne() {
-        // Under the old conservative policy this errored; with the
-        // generalised `lower_binary_i1(Xor, ...)` a non-const-true rhs
-        // is a well-formed XOR on Booleans, which we emit as inequality.
-        // `xor i1 %a, false`
-        // gets both operands wrapped by `as_boolean_expression`, yielding
-        // `(a == 1) != (0 == 1)` — semantically just `a`.
+    fn xor_false_rhs_folds_to_identity() {
+        // `xor i1 %a, false` folds to just `a`.
         let mut s = SymbolTable::new();
         s.record_ssa("a", index_expr("c", 0));
         lower_binary_i1(
@@ -460,23 +487,46 @@ mod tests {
             &mut s,
         )
         .unwrap();
-        let got = s.lookup_ssa("r").unwrap();
-        let a_wrap = Expression::Binary {
-            op: BinaryOp::Eq,
-            lhs: Box::new(index_expr("c", 0)),
-            rhs: Box::new(Expression::Integer(1)),
-        };
-        let zero_wrap = Expression::Binary {
-            op: BinaryOp::Eq,
-            lhs: Box::new(Expression::Integer(0)),
-            rhs: Box::new(Expression::Integer(1)),
-        };
-        let expected = Expression::Binary {
-            op: BinaryOp::Ne,
-            lhs: Box::new(a_wrap),
-            rhs: Box::new(zero_wrap),
-        };
-        assert_eq!(got, expected);
+        assert_eq!(s.lookup_ssa("r").unwrap(), index_expr("c", 0));
+    }
+
+    #[test]
+    fn xor_true_lhs_folds_to_logical_not() {
+        // `xor i1 true, %a` folds to logical NOT of `a`.
+        let mut s = SymbolTable::new();
+        s.record_ssa("a", index_expr("c", 0));
+        lower_binary_i1(
+            "r",
+            BinaryI1Op::Xor,
+            &Operand::ConstBool(true),
+            &Operand::Ssa("a".into()),
+            &mut s,
+        )
+        .unwrap();
+        assert_eq!(
+            s.lookup_ssa("r").unwrap(),
+            Expression::Binary {
+                op: BinaryOp::Eq,
+                lhs: Box::new(index_expr("c", 0)),
+                rhs: Box::new(Expression::Integer(0)),
+            }
+        );
+    }
+
+    #[test]
+    fn xor_false_lhs_folds_to_identity() {
+        // Swapped mirror of `xor i1 %a, false`; folds to just `a`.
+        let mut s = SymbolTable::new();
+        s.record_ssa("a", index_expr("c", 0));
+        lower_binary_i1(
+            "r",
+            BinaryI1Op::Xor,
+            &Operand::ConstBool(false),
+            &Operand::Ssa("a".into()),
+            &mut s,
+        )
+        .unwrap();
+        assert_eq!(s.lookup_ssa("r").unwrap(), index_expr("c", 0));
     }
 
     #[test]
@@ -597,6 +647,86 @@ mod tests {
                 op: BinaryOp::Or,
                 lhs: Box::new(wrap(0)),
                 rhs: Box::new(wrap(1)),
+            }
+        );
+    }
+
+    #[test]
+    fn select_i1_inverse_short_circuit_and_reduces_to_not_cond_and_rhs() {
+        // `!cond && rhs` → `select i1 %cond, i1 false, i1 %rhs`.
+        let mut s = SymbolTable::new();
+        s.record_ssa("cond", index_expr("c", 0));
+        s.record_ssa("rhs", index_expr("c", 1));
+        lower_select_i1(
+            "r",
+            "i1",
+            &Operand::Ssa("cond".into()),
+            &Operand::ConstBool(false),
+            &Operand::Ssa("rhs".into()),
+            &mut s,
+        )
+        .unwrap();
+        let got = s.lookup_ssa("r").unwrap();
+        let wrap_eq_1 = Expression::Binary {
+            op: BinaryOp::Eq,
+            lhs: Box::new(index_expr("c", 0)),
+            rhs: Box::new(Expression::Integer(1)),
+        };
+        let not_cond = Expression::Unary {
+            op: UnaryOp::Not,
+            expr: Box::new(wrap_eq_1),
+        };
+        let rhs_wrap = Expression::Binary {
+            op: BinaryOp::Eq,
+            lhs: Box::new(index_expr("c", 1)),
+            rhs: Box::new(Expression::Integer(1)),
+        };
+        assert_eq!(
+            got,
+            Expression::Binary {
+                op: BinaryOp::And,
+                lhs: Box::new(not_cond),
+                rhs: Box::new(rhs_wrap),
+            }
+        );
+    }
+
+    #[test]
+    fn select_i1_inverse_short_circuit_or_reduces_to_not_cond_or_rhs() {
+        // `!cond || rhs` → `select i1 %cond, i1 %rhs, i1 true`.
+        let mut s = SymbolTable::new();
+        s.record_ssa("cond", index_expr("c", 0));
+        s.record_ssa("rhs", index_expr("c", 1));
+        lower_select_i1(
+            "r",
+            "i1",
+            &Operand::Ssa("cond".into()),
+            &Operand::Ssa("rhs".into()),
+            &Operand::ConstBool(true),
+            &mut s,
+        )
+        .unwrap();
+        let got = s.lookup_ssa("r").unwrap();
+        let wrap_eq_1 = Expression::Binary {
+            op: BinaryOp::Eq,
+            lhs: Box::new(index_expr("c", 0)),
+            rhs: Box::new(Expression::Integer(1)),
+        };
+        let not_cond = Expression::Unary {
+            op: UnaryOp::Not,
+            expr: Box::new(wrap_eq_1),
+        };
+        let rhs_wrap = Expression::Binary {
+            op: BinaryOp::Eq,
+            lhs: Box::new(index_expr("c", 1)),
+            rhs: Box::new(Expression::Integer(1)),
+        };
+        assert_eq!(
+            got,
+            Expression::Binary {
+                op: BinaryOp::Or,
+                lhs: Box::new(not_cond),
+                rhs: Box::new(rhs_wrap),
             }
         );
     }
