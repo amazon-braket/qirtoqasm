@@ -30,6 +30,7 @@
 #![warn(missing_docs)]
 
 pub mod boolean;
+pub mod builders;
 pub mod cfg;
 pub mod error;
 pub mod ir;
