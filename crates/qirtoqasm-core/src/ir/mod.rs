@@ -5,6 +5,7 @@
 //! In-memory data model for parsed QIR modules.
 
 pub mod model;
+pub mod parser;
 pub(crate) mod parser_util;
 
 pub use model::{
