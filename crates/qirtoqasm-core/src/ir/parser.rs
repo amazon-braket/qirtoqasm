@@ -34,12 +34,11 @@ pub fn parse_module(text: &str) -> Result<Module> {
         if p.eof() {
             break;
         }
-        let line_start = p.pos;
         let raw_line = p.peek_line();
         let trimmed = raw_line.trim_start();
 
         if trimmed.starts_with("define") {
-            let func = parse_define(&mut p, &attr_groups)?;
+            let func = parse_define(&mut p)?;
             items.push(ParsedItem::Define(func));
         } else if trimmed.starts_with("declare") {
             let func = parse_declare(&mut p)?;
@@ -53,7 +52,6 @@ pub fn parse_module(text: &str) -> Result<Module> {
         } else {
             // Any other top-level line (comments, target triple, source_filename,
             // type aliases, global constants, module flags) is ignored. Advance.
-            let _ = line_start;
             p.consume_rest_of_line();
         }
     }
@@ -197,10 +195,7 @@ fn parse_declare(p: &mut Parser<'_>) -> Result<Function> {
     })
 }
 
-fn parse_define(
-    p: &mut Parser<'_>,
-    _attr_groups: &std::collections::HashMap<u32, String>,
-) -> Result<PendingFunction> {
+fn parse_define(p: &mut Parser<'_>) -> Result<PendingFunction> {
     // The `define` header may span multiple lines if someone wrapped
     // it, but in every QIR module we ship it fits on one line. Accept
     // one-line headers.
@@ -285,18 +280,22 @@ fn parse_define(
         //   1. paren depth is balanced, AND
         //   2. if the instruction is a `call`, we've seen an `@` token
         //      (the callee name) — otherwise the function-type prefix
-        //      hasn't been followed by a callee on the same logical line.
+        //      hasn't been followed by a callee on the same logical
+        //      line.
+        // `depth` and `seen_at` are tracked incrementally from each
+        // newly-appended slice. `is_call_start` is determined by the
+        // first line via `effective_opcode`, which sees through the
+        // optional `%x =` assignment prefix and `tail`/`musttail`/
+        // `notail` call qualifiers.
         let mut accumulated = String::new();
         accumulated.push_str(trimmed);
         p.consume_rest_of_line();
+        let live_first = strip_trailing_comment(trimmed);
+        let mut depth = paren_depth(live_first);
+        let mut seen_at = live_first.contains('@');
+        let is_call_start = effective_opcode(&accumulated) == "call";
         loop {
-            let live = strip_trailing_comment(&accumulated);
-            let balanced = paren_depth(live) == 0;
-            let is_call_start = first_nonassign_token(&accumulated) == "call"
-                || (is_assignment_prefix(&accumulated)
-                    && second_nonassign_token(&accumulated) == "call");
-            let call_has_callee = accumulated.contains('@');
-            let done = balanced && (!is_call_start || call_has_callee);
+            let done = depth == 0 && (!is_call_start || seen_at);
             if done {
                 break;
             }
@@ -312,6 +311,11 @@ fn parse_define(
             }
             accumulated.push(' ');
             accumulated.push_str(extra);
+            let live_extra = strip_trailing_comment(extra);
+            depth += paren_depth(live_extra);
+            if !seen_at {
+                seen_at = live_extra.contains('@');
+            }
             p.consume_rest_of_line();
         }
         let instr = parse_instruction_line(&accumulated)?;
@@ -487,19 +491,9 @@ fn parse_instruction_line(line: &str) -> Result<Instruction> {
         (None, line)
     };
 
-    // The opcode is the first whitespace-delimited token. We need to
-    // accept qualifiers like `tail call`, `musttail call`, `fast math call`, etc.
-    let mut rest = body;
-    loop {
-        let token = first_token(rest);
-        match token {
-            "tail" | "musttail" | "fast" | "nnan" | "ninf" | "nsz" | "arcp" | "contract"
-            | "afn" | "reassoc" | "fast-math-flags" => {
-                rest = after_token(rest);
-            }
-            _ => break,
-        }
-    }
+    // Strip any instruction-prefix qualifiers (`tail`, `musttail`,
+    // `notail`) before reading the opcode.
+    let rest = strip_call_prefix_qualifiers(body);
     let opcode = first_token(rest);
     let args = after_token(rest).trim_start();
 
@@ -507,48 +501,12 @@ fn parse_instruction_line(line: &str) -> Result<Instruction> {
         "call" => parse_call(result, args),
         "br" => parse_br(args),
         "ret" => Ok(Instruction::Ret),
-        "icmp" => Err(QirToQasmError::Unsupported(
-            "icmp not yet supported in this build".into(),
-        )),
-        "xor" => Err(QirToQasmError::Unsupported(
-            "xor not yet supported in this build".into(),
-        )),
-        "and" => Err(QirToQasmError::Unsupported(
-            "and not yet supported in this build".into(),
-        )),
-        "or" => Err(QirToQasmError::Unsupported(
-            "or not yet supported in this build".into(),
-        )),
-        "select" => Err(QirToQasmError::Unsupported(
-            "select not yet supported in this build".into(),
-        )),
-        "add" => Err(QirToQasmError::Unsupported(
-            "add not yet supported in this build".into(),
-        )),
-        "sub" => Err(QirToQasmError::Unsupported(
-            "sub not yet supported in this build".into(),
-        )),
-        "mul" => Err(QirToQasmError::Unsupported(
-            "mul not yet supported in this build".into(),
-        )),
-        "phi" => Err(QirToQasmError::Unsupported(
-            "phi not yet supported in this build".into(),
-        )),
-        "alloca" => Err(QirToQasmError::Unsupported(
-            "alloca not yet supported in this build".into(),
-        )),
-        "bitcast" => Err(QirToQasmError::Unsupported(
-            "bitcast not yet supported in this build".into(),
-        )),
-        "getelementptr" => Err(QirToQasmError::Unsupported(
-            "getelementptr not yet supported in this build".into(),
-        )),
-        "load" => Err(QirToQasmError::Unsupported(
-            "load not yet supported in this build".into(),
-        )),
-        "store" => Err(QirToQasmError::Unsupported(
-            "store not yet supported in this build".into(),
-        )),
+        // Scaffolding stub — these opcodes are handled once the full
+        // instruction set lands.
+        op @ ("icmp" | "xor" | "and" | "or" | "select" | "add" | "sub" | "mul" | "phi"
+        | "alloca" | "bitcast" | "getelementptr" | "load" | "store") => Err(
+            QirToQasmError::Unsupported(format!("{op} not yet supported in this build")),
+        ),
         "zext" => Ok(parse_zext(result, args).unwrap_or(Instruction::Ignored {
             opcode: "zext".into(),
         })),
@@ -594,6 +552,34 @@ fn after_token(s: &str) -> &str {
         .position(|b| b.is_ascii_whitespace())
         .unwrap_or(s.len());
     s[end..].trim_start()
+}
+
+/// Strip any leading instruction-prefix qualifiers (`tail`, `musttail`,
+/// `notail`) from `s` and return the trimmed remainder. Fast-math flags
+/// (`fast`, `nnan`, etc.) appear *after* the opcode in LLVM IR, not
+/// before it, and are not stripped here.
+fn strip_call_prefix_qualifiers(s: &str) -> &str {
+    let mut rest = s.trim_start();
+    loop {
+        match first_token(rest) {
+            "tail" | "musttail" | "notail" => rest = after_token(rest),
+            _ => return rest,
+        }
+    }
+}
+
+/// Return the effective opcode of `line`: the first token after
+/// stripping the optional `%<name> =` assignment prefix and any
+/// leading call-prefix qualifiers. Empty string if the line has no
+/// opcode token.
+fn effective_opcode(line: &str) -> &str {
+    let mut rest = line.trim_start();
+    if is_assignment_prefix(rest) {
+        if let Some(eq) = rest.find('=') {
+            rest = rest[eq + 1..].trim_start();
+        }
+    }
+    first_token(strip_call_prefix_qualifiers(rest))
 }
 
 // ---------------------------------------------------------------------------
@@ -832,8 +818,8 @@ fn extract_bitcast_global_name(value: &str) -> Option<String> {
     // against the parenthesised type spellings that surround it.
     let mut cursor = body;
     while !cursor.is_empty() {
-        if let Some(rest) = cursor.strip_prefix('@') {
-            let (name, _) = super::parser_util::parse_global_name(&format!("@{rest}"))?;
+        if cursor.starts_with('@') {
+            let (name, _) = super::parser_util::parse_global_name(cursor)?;
             return Some(name);
         }
         let mut chars = cursor.char_indices();
@@ -1135,19 +1121,6 @@ fn is_assignment_prefix(line: &str) -> bool {
     }
 }
 
-fn first_nonassign_token(line: &str) -> &str {
-    first_token(line)
-}
-
-fn second_nonassign_token(line: &str) -> &str {
-    let trimmed = line.trim_start();
-    let eq = match trimmed.find('=') {
-        Some(i) => i,
-        None => return "",
-    };
-    first_token(&trimmed[eq + 1..])
-}
-
 #[cfg(test)]
 mod more_tests {
     use super::*;
@@ -1387,6 +1360,11 @@ mod more_tests {
     #[test]
     fn parse_inttoptr_handles_negative_and_missing_parts() {
         assert_eq!(parse_inttoptr("inttoptr (i64 5 to ptr)"), Some(5));
+        assert_eq!(parse_inttoptr("inttoptr (i64 -3 to ptr)"), Some(-3));
+        assert_eq!(
+            parse_inttoptr("inttoptr (i64 -9223372036854775808 to ptr)"),
+            Some(i64::MIN)
+        );
         assert!(parse_inttoptr("something else").is_none());
         assert!(parse_inttoptr("inttoptr (i64 not-a-number to ptr)").is_none());
     }
@@ -1435,9 +1413,6 @@ attributes #0 = { \"entry_point\" }
         assert!(is_assignment_prefix("  %x = call void @f()"));
         assert!(!is_assignment_prefix("call void @f()"));
         assert!(!is_assignment_prefix(""));
-        assert_eq!(first_nonassign_token("call void"), "call");
-        assert_eq!(second_nonassign_token("%x = call void"), "call");
-        assert_eq!(second_nonassign_token("no equals here"), "");
     }
 }
 
@@ -1631,5 +1606,169 @@ attributes #0 = { \"entry_point\" }
             parse_instruction_line("musttail call void @__quantum__qis__h__body(%Qubit* null)")
                 .unwrap();
         matches!(instr, Instruction::Call { .. });
+    }
+
+    /// Full module fixture for a Bell-state circuit — exercises
+    /// `parse_module` end-to-end.
+    const BELL_STATE_MODULE: &str = r#"
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+entry:
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__cnot__body(%Qubit* null,
+                                        %Qubit* inttoptr (i64 1 to %Qubit*))
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  call void @__quantum__qis__mz__body(%Qubit* inttoptr (i64 1 to %Qubit*),
+                                      %Result* inttoptr (i64 1 to %Result*))
+  ret void
+}
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__cnot__body(%Qubit*, %Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="2" "requiredResults"="2" }
+attributes #1 = { "irreversible" }
+"#;
+
+    #[test]
+    fn bell_state_module_parses_end_to_end() {
+        let m = parse_module(BELL_STATE_MODULE).unwrap();
+        // Three declares + one define.
+        assert_eq!(m.functions.len(), 4);
+        let main = m
+            .functions
+            .iter()
+            .find(|f| f.name == "main")
+            .expect("main missing");
+        assert!(main.is_entry_point);
+        assert!(!main.is_declaration);
+        // Single `entry` block containing the four calls plus ret.
+        assert_eq!(main.blocks.len(), 1);
+        assert_eq!(main.blocks[0].name, "entry");
+        assert_eq!(main.blocks[0].instructions.len(), 5);
+        // Confirm the two wrapped calls (cnot and mz #2) were
+        // accumulated correctly across their continuation lines.
+        let call_count = main.blocks[0]
+            .instructions
+            .iter()
+            .filter(|i| matches!(i, Instruction::Call { .. }))
+            .count();
+        assert_eq!(call_count, 4);
+        assert!(matches!(
+            main.blocks[0].instructions.last(),
+            Some(Instruction::Ret)
+        ));
+    }
+
+    #[test]
+    fn wrapped_plain_call_accumulates_across_lines() {
+        // A plain `call` whose operand list is wrapped across two
+        // lines.
+        let module = r#"
+%Qubit = type opaque
+define void @main() #0 {
+entry:
+  call void @__quantum__qis__cnot__body(%Qubit* null,
+                                        %Qubit* inttoptr (i64 1 to %Qubit*))
+  ret void
+}
+declare void @__quantum__qis__cnot__body(%Qubit*, %Qubit*)
+attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="2" "requiredResults"="0" }
+"#;
+        let m = parse_module(module).unwrap();
+        let main = m.functions.iter().find(|f| f.name == "main").unwrap();
+        assert_eq!(main.blocks[0].instructions.len(), 2); // call + ret
+        assert!(matches!(
+            main.blocks[0].instructions[0],
+            Instruction::Call { .. }
+        ));
+    }
+
+    #[test]
+    fn wrapped_tail_call_accumulates_across_lines() {
+        // A `tail call` whose operand list wraps across multiple
+        // lines. The callee `@name` appears on a line after the parens
+        // have balanced once, so the accumulator must know the
+        // instruction is a `call` (via `effective_opcode` seeing
+        // through the `tail` qualifier) to continue reading.
+        let module = r#"
+%Qubit = type opaque
+define void @main() #0 {
+entry:
+  tail call void (i64, i64, i64, i64, i8*, ...)
+      @generalizedInvokeWithRotationsControlsTargets(
+          i64 0, i64 0, i64 1, i64 1,
+          i8* bitcast (void (%Qubit*)* @__quantum__qis__x__ctl to i8*),
+          %Qubit* null, %Qubit* inttoptr (i64 1 to %Qubit*))
+  ret void
+}
+declare void @generalizedInvokeWithRotationsControlsTargets(i64, i64, i64, i64, i8*, ...)
+declare void @__quantum__qis__x__ctl(%Qubit*)
+attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="2" "requiredResults"="0" }
+"#;
+        let m = parse_module(module).unwrap();
+        let main = m.functions.iter().find(|f| f.name == "main").unwrap();
+        assert_eq!(main.blocks[0].instructions.len(), 2); // tail call + ret
+        assert!(matches!(
+            main.blocks[0].instructions[0],
+            Instruction::Call { .. }
+        ));
+    }
+
+    #[test]
+    fn wrapped_assignment_tail_call_accumulates_across_lines() {
+        // `%x = tail call ...` wrapped across lines — exercises both
+        // the assignment-prefix and the qualifier stripping in
+        // `effective_opcode`.
+        let module = r#"
+%Result = type opaque
+define void @main() #0 {
+entry:
+  %r = tail call i1
+      @__quantum__qis__read_result__body(
+          %Result* inttoptr (i64 0 to %Result*))
+  ret void
+}
+declare i1 @__quantum__qis__read_result__body(%Result*)
+attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="0" "requiredResults"="1" }
+"#;
+        let m = parse_module(module).unwrap();
+        let main = m.functions.iter().find(|f| f.name == "main").unwrap();
+        assert_eq!(main.blocks[0].instructions.len(), 2);
+        assert!(matches!(
+            main.blocks[0].instructions[0],
+            Instruction::Call { .. }
+        ));
+    }
+
+    #[test]
+    fn effective_opcode_sees_through_assignment_and_qualifiers() {
+        assert_eq!(effective_opcode("call void @f()"), "call");
+        assert_eq!(effective_opcode("tail call void @f()"), "call");
+        assert_eq!(effective_opcode("musttail call void @f()"), "call");
+        assert_eq!(effective_opcode("notail call void @f()"), "call");
+        assert_eq!(effective_opcode("%x = call void @f()"), "call");
+        assert_eq!(effective_opcode("%x = tail call i1 @f()"), "call");
+        assert_eq!(effective_opcode("%x = musttail call void @f()"), "call");
+        assert_eq!(effective_opcode("ret void"), "ret");
+        assert_eq!(effective_opcode("br label %exit"), "br");
+        // Assignment with no call qualifier still resolves opcode.
+        assert_eq!(effective_opcode("%x = add i32 1, 2"), "add");
+    }
+
+    #[test]
+    fn strip_call_prefix_qualifiers_handles_stacked_qualifiers() {
+        // LLVM only allows one prefix qualifier at a time, but the
+        // helper should still consume them left-to-right for safety.
+        assert_eq!(strip_call_prefix_qualifiers("tail call foo"), "call foo");
+        assert_eq!(
+            strip_call_prefix_qualifiers("musttail call foo"),
+            "call foo"
+        );
+        assert_eq!(strip_call_prefix_qualifiers("notail call foo"), "call foo");
+        assert_eq!(strip_call_prefix_qualifiers("call foo"), "call foo");
+        // No qualifier — pass-through.
+        assert_eq!(strip_call_prefix_qualifiers("add i32 1, 2"), "add i32 1, 2");
     }
 }
