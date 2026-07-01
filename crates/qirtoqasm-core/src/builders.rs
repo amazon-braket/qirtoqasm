@@ -50,7 +50,9 @@ pub fn lower_call(
             Ok(Vec::new())
         }
         FunctionBuilder::RecordOutputNoop => Ok(Vec::new()),
-        FunctionBuilder::GeneralizedControlled => build_generalized_controlled(args, symbols),
+        FunctionBuilder::GeneralizedControlled => {
+            build_generalized_controlled(&signature, args, symbols)
+        }
     }
 }
 
@@ -147,10 +149,34 @@ fn build_gate(
 /// Braket has no `cccnot`) produce a descriptive error rather than an
 /// incorrect translation.
 fn build_generalized_controlled(
+    signature: &FunctionSignature,
     args: &[Operand],
     symbols: &mut SymbolTable,
 ) -> Result<Vec<Statement>> {
     const CALLEE: &str = "generalizedInvokeWithRotationsControlsTargets";
+    // Verify that this dispatch arm was actually reached for the right
+    // callee. Every other builder guards this via `expect_signature`;
+    // without an equivalent guard here, a misclassification upstream
+    // (e.g. a plain `cnot` routed to `GeneralizedControlled` by mistake
+    // in `profile.rs`) would surface as a confusing error about
+    // `generalizedInvokeWithRotationsControlsTargets` operands the user
+    // never passed, obscuring the real bug in the classifier.
+    const EXPECTED_PREFIX: &[&str] = &["i64", "i64", "i64", "i64", "i8*"];
+    let prefix_ok = signature.param_types.len() >= EXPECTED_PREFIX.len()
+        && signature
+            .param_types
+            .iter()
+            .zip(EXPECTED_PREFIX.iter())
+            .all(|(got, exp)| got == exp);
+    if signature.name != CALLEE || !signature.is_variadic || !prefix_ok {
+        return Err(QirToQasmError::unsupported(format!(
+            "generalized-controlled intrinsic {:?} has unexpected signature \
+             {:?} (variadic={}); expected callee {CALLEE:?} with parameter \
+             prefix (\"i64\", \"i64\", \"i64\", \"i64\", \"i8*\", ...) and \
+             is_variadic=true",
+            signature.name, signature.param_types, signature.is_variadic,
+        )));
+    }
     if args.len() < 5 {
         return Err(QirToQasmError::unsupported(format!(
             "{CALLEE} expects at least 5 operands (numRotations, adjoint, \
@@ -919,5 +945,113 @@ mod more_tests {
         assert!(err
             .to_string()
             .contains("numRotations must be an i64 constant"));
+    }
+
+    #[test]
+    fn generalized_controlled_wrong_callee_name_errors_at_dispatch() {
+        // Regression test: if `profile.rs` ever misclassifies a callee as
+        // `GeneralizedControlled`, the resulting error must point at the
+        // misclassified callee, not at the generalized-invoke intrinsic's
+        // internals (numRotations / numControls / etc.) which the user
+        // never actually invoked.
+        let mut s = SymbolTable::new();
+        let b = FunctionBuilder::GeneralizedControlled;
+        // Signature shape matches the variadic prefix, but the name doesn't.
+        let signature = variadic_sig("someOtherIntrinsic");
+        let args = vec![
+            Operand::ConstInt(0),
+            Operand::ConstInt(0),
+            Operand::ConstInt(1),
+            Operand::ConstInt(1),
+            Operand::BitcastGlobal("__quantum__qis__x__ctl".into()),
+            Operand::I8Null,
+            opaque(1),
+        ];
+        let err = lower_call(&b, &signature, &args, None, &mut s).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("generalized-controlled intrinsic")
+                && msg.contains("someOtherIntrinsic")
+                && msg.contains("unexpected signature"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    #[test]
+    fn generalized_controlled_wrong_prefix_types_errors_at_dispatch() {
+        // Same guard, tripped by a param-type-prefix mismatch rather than
+        // a name mismatch. If a caller ever manages to reach this arm with
+        // a signature whose fixed-arg prefix is not
+        // (i64, i64, i64, i64, i8*), we should reject early rather than
+        // interpret garbage as rotation/control counts.
+        let mut s = SymbolTable::new();
+        let b = FunctionBuilder::GeneralizedControlled;
+        let signature = FunctionSignature {
+            name: "generalizedInvokeWithRotationsControlsTargets".into(),
+            return_type: "void".into(),
+            param_types: vec![
+                // Wrong: swap first i64 with i32.
+                "i32".into(),
+                "i64".into(),
+                "i64".into(),
+                "i64".into(),
+                "i8*".into(),
+            ],
+            is_variadic: true,
+        };
+        let args = vec![
+            Operand::ConstInt(0),
+            Operand::ConstInt(0),
+            Operand::ConstInt(1),
+            Operand::ConstInt(1),
+            Operand::BitcastGlobal("__quantum__qis__x__ctl".into()),
+            Operand::I8Null,
+            opaque(1),
+        ];
+        let err = lower_call(&b, &signature, &args, None, &mut s).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("generalized-controlled intrinsic")
+                && msg.contains("unexpected signature")
+                && msg.contains("\"i32\""),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    #[test]
+    fn generalized_controlled_non_variadic_errors_at_dispatch() {
+        // Same guard, tripped by is_variadic=false. This shouldn't happen
+        // through the normal parser+profile path, but guard against a
+        // future refactor that constructs `FunctionSignature` values by
+        // hand and forgets the flag.
+        let mut s = SymbolTable::new();
+        let b = FunctionBuilder::GeneralizedControlled;
+        let signature = FunctionSignature {
+            name: "generalizedInvokeWithRotationsControlsTargets".into(),
+            return_type: "void".into(),
+            param_types: vec![
+                "i64".into(),
+                "i64".into(),
+                "i64".into(),
+                "i64".into(),
+                "i8*".into(),
+            ],
+            is_variadic: false, // wrong
+        };
+        let args = vec![
+            Operand::ConstInt(0),
+            Operand::ConstInt(0),
+            Operand::ConstInt(1),
+            Operand::ConstInt(1),
+            Operand::BitcastGlobal("__quantum__qis__x__ctl".into()),
+            Operand::I8Null,
+            opaque(1),
+        ];
+        let err = lower_call(&b, &signature, &args, None, &mut s).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("generalized-controlled intrinsic") && msg.contains("variadic=false"),
+            "unexpected error message: {msg}"
+        );
     }
 }
