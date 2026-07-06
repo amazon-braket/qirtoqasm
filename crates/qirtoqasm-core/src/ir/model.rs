@@ -171,9 +171,6 @@ pub enum Instruction {
         value: Operand,
         /// Pointer SSA id (must be in the symbol table's alias map).
         ptr: String,
-        /// Optional offset into the alloca region (from the pointer's
-        /// underlying gep).
-        offset: u64,
     },
     /// `%result = load <ty>, <ty>* <ptr>` — cudaq loads previously
     /// stored scalar values out of an alloca slot to use as a gate

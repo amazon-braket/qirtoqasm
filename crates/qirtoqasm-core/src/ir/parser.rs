@@ -987,9 +987,8 @@ fn parse_icmp(result: Option<String>, args: &str) -> Result<Instruction> {
     }))
 }
 
-/// Parse `%r = <opcode> <ty> <lhs>, <rhs>` for the bitwise-i1 opcodes
-/// `xor` / `and` / `or`. The `opcode` string is passed only for error
-/// messages.
+/// Parse `%r = <opcode> i1 <lhs>, <rhs>` for `xor` / `and` / `or`.
+/// The `opcode` string is passed only for error messages.
 fn parse_binary_i1(
     result: Option<String>,
     args: &str,
@@ -1000,6 +999,11 @@ fn parse_binary_i1(
         .ok_or_else(|| QirToQasmError::syntax(format!("{opcode} without SSA result assignment")))?;
     let s = args.trim();
     let ty = first_token(s);
+    if ty != "i1" {
+        return Err(QirToQasmError::unsupported(format!(
+            "{opcode} on {ty} not yet supported (only i1 is handled)"
+        )));
+    }
     let rest = after_token(s);
     let pieces = super::parser_util::split_top_level_commas(rest);
     if pieces.len() != 2 {
@@ -1017,9 +1021,9 @@ fn parse_binary_i1(
     })
 }
 
-/// Parse `%r = <opcode> [nuw] [nsw] [exact] <ty> <lhs>, <rhs>` for the
-/// integer arithmetic opcodes `add` / `sub` / `mul`. The overflow /
-/// exact flags are accepted and discarded.
+/// Parse `%r = <opcode> [nuw] [nsw] <ty> <lhs>, <rhs>` for the
+/// integer arithmetic opcodes `add` / `sub` / `mul`. The overflow
+/// flags are accepted and discarded.
 fn parse_int_arith(
     result: Option<String>,
     args: &str,
@@ -1031,7 +1035,7 @@ fn parse_int_arith(
     let mut s = args.trim();
     loop {
         let tok = first_token(s);
-        if matches!(tok, "nuw" | "nsw" | "exact") {
+        if matches!(tok, "nuw" | "nsw") {
             s = after_token(s);
         } else {
             break;
@@ -1292,11 +1296,7 @@ fn parse_store(args: &str) -> Option<Instruction> {
     let (ty, val_text) = val_chunk.split_once(char::is_whitespace)?;
     let value = parse_operand(&format!("{} {}", ty, val_text.trim())).ok()?;
     let ptr = last_percent_ident(ptr_chunk)?;
-    Some(Instruction::Store {
-        value,
-        ptr,
-        offset: 0,
-    })
+    Some(Instruction::Store { value, ptr })
 }
 
 // ---------------------------------------------------------------------------
@@ -1692,6 +1692,30 @@ mod more_tests {
     }
 
     #[test]
+    fn parse_binary_i1_rejects_non_i1_widths() {
+        // `and`/`or`/`xor` on integer widths wider than i1 are bitwise
+        // ops in LLVM; the current lowering only handles i1 (Boolean),
+        // so wider widths must produce a clean unsupported error rather
+        // than silently emitting `a && b` for what should be `a & b`.
+        for shape in [
+            "%c = and i64 %a, %b",
+            "%c = or i32 %a, %b",
+            "%c = xor i8 %a, %b",
+        ] {
+            let err = parse_instruction_line(shape).unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("not yet supported"),
+                "expected unsupported-error for {shape:?}, got {msg:?}"
+            );
+            assert!(
+                msg.contains("only i1 is handled"),
+                "expected narrowing hint for {shape:?}, got {msg:?}"
+            );
+        }
+    }
+
+    #[test]
     fn parse_select_without_assignment_errors() {
         let err = parse_instruction_line("select i1 %c, i1 %a, i1 %b").unwrap_err();
         assert!(err.to_string().contains("select without SSA result"));
@@ -1750,6 +1774,22 @@ mod more_tests {
         };
         assert_eq!(result, "c");
         assert_eq!(op, IntArithOp::Add);
+    }
+
+    #[test]
+    fn parse_int_arith_does_not_swallow_exact_flag() {
+        // `exact` is an LLVM flag for `udiv` / `sdiv` / `ashr` / `lshr`,
+        // not for `add` / `sub` / `mul`. Encountering it on integer
+        // arithmetic indicates malformed IR; the parser must not skip
+        // over it silently.
+        let err = parse_instruction_line("%c = add exact i32 %a, %b").unwrap_err();
+        // The `exact` token is treated as the operand-type slot; the
+        // resulting `exact %a` operand fails to parse.
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("without SSA result"),
+            "unexpected error shape: {msg:?}"
+        );
     }
 
     #[test]
