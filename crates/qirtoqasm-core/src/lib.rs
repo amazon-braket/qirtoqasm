@@ -5,16 +5,10 @@
 //! qirtoqasm-core: pure-Rust QIR → Braket-compatible OpenQASM 3 translator.
 //!
 //! The public surface is [`translate`], [`TranslateOptions`],
-//! [`QirToQasmError`] / [`Result`], and [`VERSION`].
-//!
-//! # Scaffolding stub
-//!
-//! This is the initial scaffolding. The public API shape is final but
-//! [`translate`] currently returns
-//! `Err(QirToQasmError::Unsupported("translate is not yet implemented"))`
-//! for every input. The IR parser, the OpenQASM 3 printer, and the
-//! translator wiring will be added later; the stub is replaced once
-//! they land.
+//! [`QirToQasmError`] / [`Result`], and [`VERSION`]. All other modules
+//! are implementation detail — technically reachable as
+//! `qirtoqasm_core::<module>::*` for workspace use, but not part of the
+//! crate's stable surface.
 //!
 //! # Options
 //!
@@ -23,6 +17,24 @@
 //! [`TranslateOptions::default()`] or the [builder methods] and add
 //! fields with `..Default::default()` struct-update syntax, which
 //! leaves room for append-only field additions without breaking them.
+//!
+//! ```
+//! use qirtoqasm_core::{translate, TranslateOptions};
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # let qir = "\
+//! # %Qubit = type opaque
+//! # define void @main() #0 {
+//! #   call void @__quantum__qis__h__body(%Qubit* null)
+//! #   ret void
+//! # }
+//! # declare void @__quantum__qis__h__body(%Qubit*)
+//! # attributes #0 = { \"entry_point\" \"qir_profiles\"=\"base_profile\" \"requiredQubits\"=\"1\" \"requiredResults\"=\"0\" }
+//! # ";
+//! let _qasm = translate(qir, &TranslateOptions::default())?;
+//! let _qasm = translate(qir, &TranslateOptions::default().with_producer("mylib 0.1.2"))?;
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! [builder methods]: TranslateOptions#impl-TranslateOptions
 
@@ -38,6 +50,7 @@ pub mod oq3;
 pub mod profile;
 pub mod signatures;
 pub mod symbols;
+pub mod translator;
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -66,14 +79,14 @@ impl TranslateOptions {
 
 /// Parse QIR text and translate it to Braket-compatible OpenQASM 3.
 ///
-/// **Scaffolding stub.** Returns
-/// `Err(QirToQasmError::Unsupported("translate is not yet implemented"))`
-/// for every input. The real translator replaces this stub once it is
-/// implemented.
-pub fn translate(_qir_text: &str, _options: &TranslateOptions) -> Result<String> {
-    Err(QirToQasmError::Unsupported(
-        "translate is not yet implemented".into(),
-    ))
+/// Pass `&TranslateOptions::default()` for defaults.
+pub fn translate(qir_text: &str, options: &TranslateOptions) -> Result<String> {
+    let module = ir::parser::parse_module(qir_text)?;
+    let mut exporter = translator::Exporter::new();
+    if let Some(p) = &options.producer {
+        exporter = exporter.with_producer(p);
+    }
+    exporter.dumps(&module)
 }
 
 /// Package version, baked in at build time.
@@ -83,43 +96,53 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 mod tests {
     use super::*;
 
+    const MINIMAL_LL: &str = "\
+%Qubit = type opaque
+define void @main() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  ret void
+}
+declare void @__quantum__qis__h__body(%Qubit*)
+attributes #0 = { \"entry_point\" \"qir_profiles\"=\"base_profile\" \"requiredQubits\"=\"1\" \"requiredResults\"=\"0\" }
+";
+
     #[test]
-    fn translate_returns_not_yet_implemented() {
-        let err = translate("", &TranslateOptions::default()).unwrap_err();
-        assert_eq!(
-            err,
-            QirToQasmError::Unsupported("translate is not yet implemented".into())
-        );
-        assert_eq!(err.to_string(), "translate is not yet implemented");
+    fn default_options_omit_producer_field() {
+        let out = translate(MINIMAL_LL, &TranslateOptions::default()).unwrap();
+        assert!(!out.contains("\"producer\""), "{out}");
     }
 
     #[test]
-    fn translate_returns_not_yet_implemented_with_producer() {
-        let err = translate(
-            "anything",
+    fn producer_option_surfaces_in_generated_by_line() {
+        let out = translate(
+            MINIMAL_LL,
             &TranslateOptions::default().with_producer("mylib 0.1.2"),
         )
-        .unwrap_err();
-        assert!(matches!(err, QirToQasmError::Unsupported(_)));
+        .unwrap();
+        assert!(out.contains(r#""producer":"mylib 0.1.2""#), "{out}");
+    }
+
+    #[test]
+    fn empty_producer_option_omits_field() {
+        let out = translate(MINIMAL_LL, &TranslateOptions::default().with_producer("")).unwrap();
+        assert!(!out.contains("\"producer\""), "{out}");
+    }
+
+    #[test]
+    fn with_producer_empty_overrides_prior_value() {
+        let out = translate(
+            MINIMAL_LL,
+            &TranslateOptions::default()
+                .with_producer("mylib 0.1.2")
+                .with_producer(""),
+        )
+        .unwrap();
+        assert!(!out.contains("\"producer\""), "{out}");
     }
 
     #[test]
     fn translate_options_default_is_none() {
         assert!(TranslateOptions::default().producer.is_none());
-    }
-
-    #[test]
-    fn translate_options_with_producer_sets_field() {
-        let opts = TranslateOptions::default().with_producer("mylib 0.1.2");
-        assert_eq!(opts.producer.as_deref(), Some("mylib 0.1.2"));
-    }
-
-    #[test]
-    fn translate_options_with_empty_producer_clears() {
-        let opts = TranslateOptions::default()
-            .with_producer("mylib 0.1.2")
-            .with_producer("");
-        assert!(opts.producer.is_none());
     }
 
     #[test]
