@@ -501,12 +501,32 @@ fn parse_instruction_line(line: &str) -> Result<Instruction> {
         "call" => parse_call(result, args),
         "br" => parse_br(args),
         "ret" => Ok(Instruction::Ret),
-        // Scaffolding stub — these opcodes are handled once the full
-        // instruction set lands.
-        op @ ("icmp" | "xor" | "and" | "or" | "select" | "add" | "sub" | "mul" | "phi"
-        | "alloca" | "bitcast" | "getelementptr" | "load" | "store") => Err(
-            QirToQasmError::Unsupported(format!("{op} not yet supported in this build")),
+        "icmp" => parse_icmp(result, args),
+        "xor" => parse_binary_i1(result, args, BinaryI1Op::Xor, "xor"),
+        "and" => parse_binary_i1(result, args, BinaryI1Op::And, "and"),
+        "or" => parse_binary_i1(result, args, BinaryI1Op::Or, "or"),
+        "select" => parse_select(result, args),
+        "add" => parse_int_arith(result, args, IntArithOp::Add, "add"),
+        "sub" => parse_int_arith(result, args, IntArithOp::Sub, "sub"),
+        "mul" => parse_int_arith(result, args, IntArithOp::Mul, "mul"),
+        "phi" => parse_phi(result, args),
+        "alloca" => Ok(parse_alloca(result).unwrap_or(Instruction::Ignored {
+            opcode: "alloca".into(),
+        })),
+        "bitcast" => Ok(parse_bitcast(result, args).unwrap_or(Instruction::Ignored {
+            opcode: "bitcast".into(),
+        })),
+        "getelementptr" => Ok(
+            parse_getelementptr(result, args).unwrap_or(Instruction::Ignored {
+                opcode: "getelementptr".into(),
+            }),
         ),
+        "load" => Ok(parse_load(result, args).unwrap_or(Instruction::Ignored {
+            opcode: "load".into(),
+        })),
+        "store" => Ok(parse_store(args).unwrap_or(Instruction::Ignored {
+            opcode: "store".into(),
+        })),
         "zext" => Ok(parse_zext(result, args).unwrap_or(Instruction::Ignored {
             opcode: "zext".into(),
         })),
@@ -941,6 +961,206 @@ fn parse_label_ident(s: &str) -> String {
     s[..end].to_string()
 }
 
+/// Parse `%r = icmp <pred> <ty> <lhs>, <rhs>`. The predicate token is
+/// preserved verbatim; validation happens at lowering time.
+fn parse_icmp(result: Option<String>, args: &str) -> Result<Instruction> {
+    let result =
+        result.ok_or_else(|| QirToQasmError::syntax("icmp without SSA result assignment"))?;
+    let s = args.trim();
+    let pred = first_token(s);
+    let rest = after_token(s);
+    let ty = first_token(rest);
+    let rest = after_token(rest);
+    let pieces = super::parser_util::split_top_level_commas(rest);
+    if pieces.len() != 2 {
+        return Err(QirToQasmError::syntax(format!(
+            "icmp expects two operands: {args:?}"
+        )));
+    }
+    let lhs = parse_operand(&format!("{ty} {}", pieces[0].trim()))?;
+    let rhs = parse_operand(&format!("{ty} {}", pieces[1].trim()))?;
+    Ok(Instruction::Icmp(Icmp {
+        result,
+        predicate: PredicateI1(pred.to_string()),
+        lhs,
+        rhs,
+    }))
+}
+
+/// Parse `%r = <opcode> i1 <lhs>, <rhs>` for `xor` / `and` / `or`.
+/// The `opcode` string is passed only for error messages.
+fn parse_binary_i1(
+    result: Option<String>,
+    args: &str,
+    op: BinaryI1Op,
+    opcode: &str,
+) -> Result<Instruction> {
+    let result = result
+        .ok_or_else(|| QirToQasmError::syntax(format!("{opcode} without SSA result assignment")))?;
+    let s = args.trim();
+    let ty = first_token(s);
+    if ty != "i1" {
+        return Err(QirToQasmError::unsupported(format!(
+            "{opcode} on {ty} not yet supported (only i1 is handled)"
+        )));
+    }
+    let rest = after_token(s);
+    let pieces = super::parser_util::split_top_level_commas(rest);
+    if pieces.len() != 2 {
+        return Err(QirToQasmError::syntax(format!(
+            "{opcode} expects two operands: {args:?}"
+        )));
+    }
+    let lhs = parse_operand(&format!("{ty} {}", pieces[0].trim()))?;
+    let rhs = parse_operand(&format!("{ty} {}", pieces[1].trim()))?;
+    Ok(Instruction::BinaryI1 {
+        result,
+        op,
+        lhs,
+        rhs,
+    })
+}
+
+/// Parse `%r = <opcode> [nuw] [nsw] <ty> <lhs>, <rhs>` for the
+/// integer arithmetic opcodes `add` / `sub` / `mul`. The overflow
+/// flags are accepted and discarded.
+fn parse_int_arith(
+    result: Option<String>,
+    args: &str,
+    op: IntArithOp,
+    opcode: &str,
+) -> Result<Instruction> {
+    let result = result
+        .ok_or_else(|| QirToQasmError::syntax(format!("{opcode} without SSA result assignment")))?;
+    let mut s = args.trim();
+    loop {
+        let tok = first_token(s);
+        if matches!(tok, "nuw" | "nsw") {
+            s = after_token(s);
+        } else {
+            break;
+        }
+    }
+    let ty = first_token(s);
+    let rest = after_token(s);
+    let pieces = super::parser_util::split_top_level_commas(rest);
+    if pieces.len() != 2 {
+        return Err(QirToQasmError::syntax(format!(
+            "{opcode} expects two operands: {args:?}"
+        )));
+    }
+    let lhs = parse_operand(&format!("{ty} {}", pieces[0].trim()))?;
+    let rhs = parse_operand(&format!("{ty} {}", pieces[1].trim()))?;
+    Ok(Instruction::IntArith {
+        result,
+        op,
+        lhs,
+        rhs,
+    })
+}
+
+/// Parse `%r = select i1 <cond>, <ty> <a>, <ty> <b>`. The two branch
+/// operands must share a type; the shared spelling is preserved on
+/// `Instruction::Select` so the lowering can dispatch on it.
+fn parse_select(result: Option<String>, args: &str) -> Result<Instruction> {
+    let result =
+        result.ok_or_else(|| QirToQasmError::syntax("select without SSA result assignment"))?;
+    let s = args.trim();
+    let cond_ty = first_token(s);
+    if cond_ty != "i1" {
+        return Err(QirToQasmError::syntax(format!(
+            "select condition must be typed `i1`, got {cond_ty:?}"
+        )));
+    }
+    let rest = after_token(s);
+    let pieces = super::parser_util::split_top_level_commas(rest);
+    if pieces.len() != 3 {
+        return Err(QirToQasmError::syntax(format!(
+            "select expects three comma-separated operands (cond, then, else): {args:?}"
+        )));
+    }
+    let cond = parse_operand(&format!("{cond_ty} {}", pieces[0].trim()))?;
+    let then_src = pieces[1].trim();
+    let value_type = first_token(then_src).to_string();
+    let then_value_text = after_token(then_src);
+    let true_value = parse_operand(&format!("{value_type} {then_value_text}"))?;
+    let else_src = pieces[2].trim();
+    let else_ty = first_token(else_src);
+    if else_ty != value_type {
+        return Err(QirToQasmError::syntax(format!(
+            "select branch types must match, got then={value_type:?} else={else_ty:?}"
+        )));
+    }
+    let else_value_text = after_token(else_src);
+    let false_value = parse_operand(&format!("{value_type} {else_value_text}"))?;
+    Ok(Instruction::Select {
+        result,
+        value_type,
+        cond,
+        true_value,
+        false_value,
+    })
+}
+
+/// Parse `%r = phi <ty> [ <val>, %<block> ], [ <val>, %<block> ], ...`.
+/// At least one incoming is required.
+fn parse_phi(result: Option<String>, args: &str) -> Result<Instruction> {
+    let result =
+        result.ok_or_else(|| QirToQasmError::syntax("phi without SSA result assignment"))?;
+    let s = args.trim();
+    let ty = first_token(s);
+    let rest = after_token(s);
+    let mut out = Vec::new();
+    let bytes = rest.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        while i < bytes.len() && (bytes[i].is_ascii_whitespace() || bytes[i] == b',') {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        if bytes[i] != b'[' {
+            return Err(QirToQasmError::syntax(format!(
+                "phi malformed incoming starting at {:?}",
+                &rest[i..]
+            )));
+        }
+        let close = rest[i..]
+            .find(']')
+            .map(|o| i + o)
+            .ok_or_else(|| QirToQasmError::syntax("phi incoming missing ]"))?;
+        let inner = &rest[i + 1..close];
+        let pieces = super::parser_util::split_top_level_commas(inner);
+        if pieces.len() != 2 {
+            return Err(QirToQasmError::syntax(format!(
+                "phi incoming must have value and predecessor: [{inner}]"
+            )));
+        }
+        let val = parse_operand(&format!("{ty} {}", pieces[0].trim()))?;
+        let pred = pieces[1].trim().strip_prefix('%').ok_or_else(|| {
+            QirToQasmError::syntax(format!(
+                "phi incoming predecessor must be %<label>, got {:?}",
+                pieces[1]
+            ))
+        })?;
+        let pred_name = parse_label_ident(pred);
+        out.push(PhiIncoming {
+            value: val,
+            pred: pred_name,
+        });
+        i = close + 1;
+    }
+    if out.is_empty() {
+        return Err(QirToQasmError::syntax("phi has no incomings"));
+    }
+    Ok(Instruction::Phi {
+        result,
+        value_type: ty.to_string(),
+        incomings: out,
+    })
+}
+
 /// Find the byte offset of `keyword` in `haystack` that's not nested
 /// inside `{}`, `[]`, `<>`, or `()`.
 fn find_top_level_keyword(haystack: &str, keyword: &str) -> Option<usize> {
@@ -987,6 +1207,96 @@ fn parse_zext(result: Option<String>, args: &str) -> Option<Instruction> {
     let lhs = rest[..to_idx].trim();
     let src = last_percent_ident(lhs)?;
     Some(Instruction::Zext { result, src })
+}
+
+// ---------------------------------------------------------------------------
+// alloca / bitcast / getelementptr / load / store — minimal recognisers
+// for the array-of-scratch idiom (alloca an array, store constants,
+// bitcast / gep to element pointers, load back). Shapes that don't match
+// the recogniser fall through to `Instruction::Ignored` via `unwrap_or`
+// at the call site.
+// ---------------------------------------------------------------------------
+
+/// Parse `%r = alloca <ty>[, …]` into an `Alloca { result }` record.
+/// The type and any align modifiers are not needed by the translator.
+fn parse_alloca(result: Option<String>) -> Option<Instruction> {
+    Some(Instruction::Alloca { result: result? })
+}
+
+/// Parse `%r = bitcast <ty>* %src to <ty>*` — the SSA-to-SSA form.
+/// Global-reference and constant-expression bitcasts fall through to
+/// `Ignored`; the translator doesn't need them.
+fn parse_bitcast(result: Option<String>, args: &str) -> Option<Instruction> {
+    let result = result?;
+    let rest = args.trim();
+    let to_idx = find_top_level_keyword(rest, " to ")?;
+    let lhs = rest[..to_idx].trim();
+    let src = last_percent_ident(lhs)?;
+    Some(Instruction::BitcastAlias { result, src })
+}
+
+/// Parse `%r = getelementptr [inbounds] <ty>, <ty>* %src, i32 0, i32 <offset>`.
+/// Only the `i32 0 / i64 0` first-index plus a constant second-index
+/// shape is recognised; anything else falls through to `Ignored`.
+fn parse_getelementptr(result: Option<String>, args: &str) -> Option<Instruction> {
+    let result = result?;
+    let rest = strip_trailing_comment(args).trim();
+    let rest = rest
+        .strip_prefix("inbounds")
+        .map(str::trim_start)
+        .unwrap_or(rest);
+    let pieces = super::parser_util::split_top_level_commas(rest);
+    if pieces.len() != 4 {
+        return None;
+    }
+    // pieces[0]: `<ty>` — array type, ignore.
+    // pieces[1]: `<ty>* %src` — extract src.
+    // pieces[2]: `i32 0` or `i64 0`.
+    // pieces[3]: `i32 <offset>` or `i64 <offset>`.
+    let src = last_percent_ident(pieces[1].trim())?;
+    let leading = pieces[2].trim();
+    if leading != "i32 0" && leading != "i64 0" {
+        return None;
+    }
+    let offset_chunk = pieces[3].trim();
+    let offset_str = offset_chunk
+        .strip_prefix("i32 ")
+        .or_else(|| offset_chunk.strip_prefix("i64 "))?;
+    let offset: u64 = offset_str.parse().ok()?;
+    Some(Instruction::GetElementPtrOffset {
+        result,
+        src,
+        offset,
+    })
+}
+
+/// Parse `%r = load <ty>, <ty>* %ptr[, align N]`.
+fn parse_load(result: Option<String>, args: &str) -> Option<Instruction> {
+    let result = result?;
+    let rest = strip_trailing_comment(args).trim();
+    let pieces = super::parser_util::split_top_level_commas(rest);
+    if pieces.len() < 2 {
+        return None;
+    }
+    let ptr = last_percent_ident(pieces[1].trim())?;
+    Some(Instruction::Load { result, ptr })
+}
+
+/// Parse `store <ty> <value>, <ty>* %ptr[, align N]`.
+fn parse_store(args: &str) -> Option<Instruction> {
+    let rest = strip_trailing_comment(args).trim();
+    let pieces = super::parser_util::split_top_level_commas(rest);
+    if pieces.len() < 2 {
+        return None;
+    }
+    let val_chunk = pieces[0].trim();
+    let ptr_chunk = pieces[1].trim();
+    // val_chunk: `<ty> <value>`. Split on first whitespace for the
+    // type, remainder is the value expression.
+    let (ty, val_text) = val_chunk.split_once(char::is_whitespace)?;
+    let value = parse_operand(&format!("{} {}", ty, val_text.trim())).ok()?;
+    let ptr = last_percent_ident(ptr_chunk)?;
+    Some(Instruction::Store { value, ptr })
 }
 
 // ---------------------------------------------------------------------------
@@ -1061,6 +1371,60 @@ mod tests {
             panic!("expected Const cond, got {cond:?}")
         };
         assert!(!b);
+    }
+
+    #[test]
+    fn parses_icmp_and_xor_and_phi() {
+        let Instruction::Icmp(icmp) = parse_instruction_line("%c = icmp eq i1 %a, %b").unwrap()
+        else {
+            panic!("expected Icmp")
+        };
+        assert_eq!(icmp.result, "c");
+        assert_eq!(icmp.predicate.0, "eq");
+
+        let Instruction::BinaryI1 {
+            result, op, rhs, ..
+        } = parse_instruction_line("%c = xor i1 %a, true").unwrap()
+        else {
+            panic!("expected BinaryI1")
+        };
+        assert_eq!(result, "c");
+        assert_eq!(op, BinaryI1Op::Xor);
+        assert!(matches!(rhs, Operand::ConstBool(true)));
+
+        let Instruction::Phi {
+            result,
+            value_type,
+            incomings,
+        } = parse_instruction_line("%c = phi i1 [false, %b0], [%r, %b1]").unwrap()
+        else {
+            panic!("expected Phi")
+        };
+        assert_eq!(result, "c");
+        assert_eq!(value_type, "i1");
+        assert_eq!(incomings.len(), 2);
+        assert_eq!(incomings[0].pred, "b0");
+        assert_eq!(incomings[1].pred, "b1");
+    }
+
+    #[test]
+    fn parses_alloca_load_store_bitcast_gep() {
+        let i = parse_instruction_line("%2 = alloca [2 x double], align 8").unwrap();
+        assert!(matches!(i, Instruction::Alloca { .. }), "{i:?}");
+        let i = parse_instruction_line("%3 = bitcast [2 x double]* %2 to double*").unwrap();
+        assert!(matches!(i, Instruction::BitcastAlias { .. }), "{i:?}");
+        let i = parse_instruction_line("store double 0.1, double* %3, align 8").unwrap();
+        assert!(matches!(i, Instruction::Store { .. }), "{i:?}");
+        let i = parse_instruction_line("%6 = load double, double* %3, align 8").unwrap();
+        assert!(matches!(i, Instruction::Load { .. }), "{i:?}");
+        let i = parse_instruction_line(
+            "%4 = getelementptr [2 x double], [2 x double]* %2, i32 0, i32 1",
+        )
+        .unwrap();
+        assert!(
+            matches!(i, Instruction::GetElementPtrOffset { .. }),
+            "{i:?}"
+        );
     }
 
     #[test]
@@ -1255,6 +1619,218 @@ mod more_tests {
     fn parse_br_cond_wrong_arity_errors() {
         let err = parse_instruction_line("br i1 %c, label %t").unwrap_err();
         assert!(err.to_string().contains("cond, true_label, false_label"));
+    }
+
+    #[test]
+    fn parse_icmp_without_assignment_errors() {
+        let err = parse_instruction_line("icmp eq i1 %a, %b").unwrap_err();
+        assert!(err.to_string().contains("icmp without SSA result"));
+    }
+
+    #[test]
+    fn parse_icmp_wrong_operand_count_errors() {
+        let err = parse_instruction_line("%c = icmp eq i1 %a").unwrap_err();
+        assert!(err.to_string().contains("icmp expects two operands"));
+    }
+
+    #[test]
+    fn parse_xor_without_assignment_errors() {
+        let err = parse_instruction_line("xor i1 %a, true").unwrap_err();
+        assert!(err.to_string().contains("xor without SSA result"));
+    }
+
+    #[test]
+    fn parse_xor_wrong_operand_count_errors() {
+        let err = parse_instruction_line("%c = xor i1 %a").unwrap_err();
+        assert!(err.to_string().contains("xor expects two operands"));
+    }
+
+    #[test]
+    fn parse_and_without_assignment_errors() {
+        let err = parse_instruction_line("and i1 %a, %b").unwrap_err();
+        assert!(err.to_string().contains("and without SSA result"));
+    }
+
+    #[test]
+    fn parse_and_wrong_operand_count_errors() {
+        let err = parse_instruction_line("%c = and i1 %a").unwrap_err();
+        assert!(err.to_string().contains("and expects two operands"));
+    }
+
+    #[test]
+    fn parse_and_happy_path_binds_instruction() {
+        let Instruction::BinaryI1 { result, op, .. } =
+            parse_instruction_line("%c = and i1 %a, %b").unwrap()
+        else {
+            panic!("expected BinaryI1")
+        };
+        assert_eq!(result, "c");
+        assert_eq!(op, BinaryI1Op::And);
+    }
+
+    #[test]
+    fn parse_or_without_assignment_errors() {
+        let err = parse_instruction_line("or i1 %a, %b").unwrap_err();
+        assert!(err.to_string().contains("or without SSA result"));
+    }
+
+    #[test]
+    fn parse_or_wrong_operand_count_errors() {
+        let err = parse_instruction_line("%c = or i1 %a").unwrap_err();
+        assert!(err.to_string().contains("or expects two operands"));
+    }
+
+    #[test]
+    fn parse_or_happy_path_binds_instruction() {
+        let Instruction::BinaryI1 { result, op, .. } =
+            parse_instruction_line("%c = or i1 %a, %b").unwrap()
+        else {
+            panic!("expected BinaryI1")
+        };
+        assert_eq!(result, "c");
+        assert_eq!(op, BinaryI1Op::Or);
+    }
+
+    #[test]
+    fn parse_binary_i1_rejects_non_i1_widths() {
+        // `and`/`or`/`xor` on integer widths wider than i1 are bitwise
+        // ops in LLVM; the current lowering only handles i1 (Boolean),
+        // so wider widths must produce a clean unsupported error rather
+        // than silently emitting `a && b` for what should be `a & b`.
+        for shape in [
+            "%c = and i64 %a, %b",
+            "%c = or i32 %a, %b",
+            "%c = xor i8 %a, %b",
+        ] {
+            let err = parse_instruction_line(shape).unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("not yet supported"),
+                "expected unsupported-error for {shape:?}, got {msg:?}"
+            );
+            assert!(
+                msg.contains("only i1 is handled"),
+                "expected narrowing hint for {shape:?}, got {msg:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_select_without_assignment_errors() {
+        let err = parse_instruction_line("select i1 %c, i1 %a, i1 %b").unwrap_err();
+        assert!(err.to_string().contains("select without SSA result"));
+    }
+
+    #[test]
+    fn parse_select_non_i1_cond_type_errors() {
+        let err = parse_instruction_line("%r = select i32 %c, i32 %a, i32 %b").unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("select condition must be typed `i1`"));
+    }
+
+    #[test]
+    fn parse_select_wrong_operand_count_errors() {
+        let err = parse_instruction_line("%r = select i1 %c, i1 %a").unwrap_err();
+        assert!(err.to_string().contains("three comma-separated operands"));
+    }
+
+    #[test]
+    fn parse_select_mismatched_branch_types_error() {
+        let err = parse_instruction_line("%r = select i1 %c, i1 %a, i32 %b").unwrap_err();
+        assert!(err.to_string().contains("branch types must match"));
+    }
+
+    #[test]
+    fn parse_select_happy_path_binds_instruction() {
+        let Instruction::Select {
+            result, value_type, ..
+        } = parse_instruction_line("%r = select i1 %c, i1 %a, i1 %b").unwrap()
+        else {
+            panic!("expected Select")
+        };
+        assert_eq!(result, "r");
+        assert_eq!(value_type, "i1");
+    }
+
+    #[test]
+    fn parse_int_arith_without_assignment_errors() {
+        let err = parse_instruction_line("add i32 %a, %b").unwrap_err();
+        assert!(err.to_string().contains("add without SSA result"));
+    }
+
+    #[test]
+    fn parse_int_arith_wrong_operand_count_errors() {
+        let err = parse_instruction_line("%c = add i32 %a").unwrap_err();
+        assert!(err.to_string().contains("add expects two operands"));
+    }
+
+    #[test]
+    fn parse_int_arith_skips_nuw_nsw_flags() {
+        let Instruction::IntArith { result, op, .. } =
+            parse_instruction_line("%c = add nuw nsw i32 %a, 1").unwrap()
+        else {
+            panic!("expected IntArith")
+        };
+        assert_eq!(result, "c");
+        assert_eq!(op, IntArithOp::Add);
+    }
+
+    #[test]
+    fn parse_int_arith_does_not_swallow_exact_flag() {
+        // `exact` is an LLVM flag for `udiv` / `sdiv` / `ashr` / `lshr`,
+        // not for `add` / `sub` / `mul`. Encountering it on integer
+        // arithmetic indicates malformed IR; the parser must not skip
+        // over it silently.
+        let err = parse_instruction_line("%c = add exact i32 %a, %b").unwrap_err();
+        // The `exact` token is treated as the operand-type slot; the
+        // resulting `exact %a` operand fails to parse.
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("without SSA result"),
+            "unexpected error shape: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn parse_int_arith_sub_and_mul() {
+        let Instruction::IntArith { op, .. } =
+            parse_instruction_line("%c = sub i32 %a, %b").unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(op, IntArithOp::Sub);
+        let Instruction::IntArith { op, .. } =
+            parse_instruction_line("%c = mul i32 %a, %b").unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(op, IntArithOp::Mul);
+    }
+
+    #[test]
+    fn parse_phi_without_assignment_errors() {
+        let err = parse_instruction_line("phi i1 [false, %b0]").unwrap_err();
+        assert!(err.to_string().contains("phi without SSA result"));
+    }
+
+    #[test]
+    fn parse_phi_malformed_bracket_errors() {
+        let err = parse_instruction_line("%c = phi i1 foo").unwrap_err();
+        assert!(err.to_string().contains("phi"));
+    }
+
+    #[test]
+    fn parse_phi_bad_predecessor_errors() {
+        let err = parse_instruction_line("%c = phi i1 [false, bad]").unwrap_err();
+        assert!(err.to_string().contains("predecessor must be"));
+    }
+
+    #[test]
+    fn parse_phi_wrong_incoming_shape_errors() {
+        // An incoming with three pieces inside the brackets.
+        let err = parse_instruction_line("%c = phi i1 [false, %a, %b]").unwrap_err();
+        assert!(err.to_string().contains("incoming must have"));
     }
 
     #[test]
@@ -1659,6 +2235,111 @@ attributes #1 = { "irreversible" }
             main.blocks[0].instructions.last(),
             Some(Instruction::Ret)
         ));
+    }
+
+    /// Full module fixture exercising the complex-instruction opcodes
+    /// (`icmp`, `xor`, `and`, `select`, `add`, `phi`, `br i1`).
+    /// Confirms `parse_module` accepts them end-to-end.
+    const COMPLEX_INSTRUCTIONS_MODULE: &str = r#"
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+entry:
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  %r0 = call i1 @__quantum__qis__read_result__body(%Result* null)
+  call void @__quantum__qis__mz__body(%Qubit* inttoptr (i64 1 to %Qubit*),
+                                      %Result* inttoptr (i64 1 to %Result*))
+  %r1 = call i1 @__quantum__qis__read_result__body(%Result* inttoptr (i64 1 to %Result*))
+  %not_r0 = xor i1 %r0, true
+  %both = and i1 %r0, %r1
+  %eq = icmp eq i1 %r0, %r1
+  %count = select i1 %both, i32 2, i32 0
+  %total = add nuw nsw i32 %count, 1
+  br i1 %eq, label %then, label %exit
+then:
+  br label %exit
+exit:
+  %final = phi i32 [ %total, %entry ], [ 0, %then ]
+  ret void
+}
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__qis__read_result__body(%Result*)
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="2" "requiredResults"="2" }
+attributes #1 = { "irreversible" }
+"#;
+
+    #[test]
+    fn complex_instructions_module_parses_end_to_end() {
+        let m = parse_module(COMPLEX_INSTRUCTIONS_MODULE).unwrap();
+        let main = m.functions.iter().find(|f| f.name == "main").unwrap();
+        assert!(main.is_entry_point);
+        assert_eq!(main.blocks.len(), 3);
+        assert_eq!(main.blocks[0].name, "entry");
+        assert_eq!(main.blocks[1].name, "then");
+        assert_eq!(main.blocks[2].name, "exit");
+        // Confirm each complex-instruction shape landed as the
+        // expected variant somewhere in the function body.
+        let all: Vec<&Instruction> = main.blocks.iter().flat_map(|b| &b.instructions).collect();
+        assert!(all.iter().any(|i| matches!(i, Instruction::Icmp(_))));
+        assert!(all.iter().any(|i| matches!(
+            i,
+            Instruction::BinaryI1 {
+                op: BinaryI1Op::Xor,
+                ..
+            }
+        )));
+        assert!(all.iter().any(|i| matches!(
+            i,
+            Instruction::BinaryI1 {
+                op: BinaryI1Op::And,
+                ..
+            }
+        )));
+        assert!(all.iter().any(|i| matches!(i, Instruction::Select { .. })));
+        assert!(all.iter().any(|i| matches!(
+            i,
+            Instruction::IntArith {
+                op: IntArithOp::Add,
+                ..
+            }
+        )));
+        assert!(all.iter().any(|i| matches!(i, Instruction::Phi { .. })));
+    }
+
+    /// Full module fixture exercising the memory-family opcodes
+    /// (`alloca`, `bitcast`, `getelementptr`, `store`, `load`). These
+    /// are recognisers: shapes that don't match the expected form fall
+    /// through to `Instruction::Ignored`. This fixture uses the shapes
+    /// the recognisers accept.
+    const MEMORY_INSTRUCTIONS_MODULE: &str = r#"
+define void @main() #0 {
+entry:
+  %arr = alloca [2 x double], align 8
+  %arr_p = bitcast [2 x double]* %arr to double*
+  store double 0.1, double* %arr_p, align 8
+  %e1 = getelementptr [2 x double], [2 x double]* %arr, i32 0, i32 1
+  store double 0.2, double* %e1, align 8
+  %v0 = load double, double* %arr_p, align 8
+  ret void
+}
+attributes #0 = { "entry_point" }
+"#;
+
+    #[test]
+    fn memory_instructions_module_parses_end_to_end() {
+        let m = parse_module(MEMORY_INSTRUCTIONS_MODULE).unwrap();
+        let main = m.functions.iter().find(|f| f.name == "main").unwrap();
+        let all: Vec<&Instruction> = main.blocks[0].instructions.iter().collect();
+        assert!(all.iter().any(|i| matches!(i, Instruction::Alloca { .. })));
+        assert!(all
+            .iter()
+            .any(|i| matches!(i, Instruction::BitcastAlias { .. })));
+        assert!(all
+            .iter()
+            .any(|i| matches!(i, Instruction::GetElementPtrOffset { .. })));
+        assert!(all.iter().any(|i| matches!(i, Instruction::Store { .. })));
+        assert!(all.iter().any(|i| matches!(i, Instruction::Load { .. })));
     }
 
     #[test]
