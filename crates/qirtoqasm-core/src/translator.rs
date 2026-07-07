@@ -7,9 +7,8 @@
 //! The Base Profile end of the pipeline is complete; classical-control
 //! constructs used by the Adaptive Profile (measurement-conditional
 //! branches, phi merges, i1 comparisons and arithmetic, integer-cascade
-//! selects) are recognised by the parser but rejected here with the
+//! selects) are recognized by the parser but rejected here with the
 //! pinned `"adaptive profile feature not yet implemented"` error.
-//! Those arms will be filled in once the Adaptive lowering lands.
 
 use crate::builders::lower_call;
 use crate::cfg::{lower_cfg, BlockLowering};

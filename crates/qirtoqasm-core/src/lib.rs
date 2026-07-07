@@ -5,10 +5,7 @@
 //! qirtoqasm-core: pure-Rust QIR → Braket-compatible OpenQASM 3 translator.
 //!
 //! The public surface is [`translate`], [`TranslateOptions`],
-//! [`QirToQasmError`] / [`Result`], and [`VERSION`]. All other modules
-//! are implementation detail — technically reachable as
-//! `qirtoqasm_core::<module>::*` for workspace use, but not part of the
-//! crate's stable surface.
+//! [`QirToQasmError`] / [`Result`], and [`VERSION`].
 //!
 //! # Options
 //!

@@ -16,8 +16,6 @@
 These tests lock down the public shape of the Python package (importable
 name, exported symbols, error class, version string) and confirm that
 `translate` surfaces `QirToQasmError` when the input has no entry point.
-The full unit-test suite arrives with a broader set of end-to-end
-translation cases.
 """
 
 from __future__ import annotations
