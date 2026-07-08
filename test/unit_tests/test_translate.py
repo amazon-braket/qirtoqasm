@@ -11,14 +11,11 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 
-"""Stub-asserting tests for the scaffolding `qirtoqasm.translate`.
+"""Minimal Python-shim tests for `qirtoqasm.translate`.
 
-These tests are intentionally minimal. They lock down the public
-shape of the Python package (importable name, exported symbols, error
-class, version string) and confirm that the scaffolding stub returns
-the expected ``"translate is not yet implemented"`` error. The full
-unit-test suite, plus the 100% Python-shim coverage gate, will be
-added once the real PyO3 binding is in place.
+These tests lock down the public shape of the Python package (importable
+name, exported symbols, error class, version string) and confirm that
+`translate` surfaces `QirToQasmError` when the input has no entry point.
 """
 
 from __future__ import annotations
@@ -41,15 +38,16 @@ def test_version_is_a_nonempty_string() -> None:
     assert qirtoqasm.__version__
 
 
-def test_translate_raises_not_yet_implemented() -> None:
-    with pytest.raises(qirtoqasm.QirToQasmError, match="not yet implemented"):
+def test_translate_raises_qir_to_qasm_error_on_missing_entry_point() -> None:
+    with pytest.raises(qirtoqasm.QirToQasmError, match="no entry-point function found"):
         qirtoqasm.translate("anything")
 
 
-def test_translate_with_producer_kwarg_still_raises() -> None:
+def test_translate_with_producer_kwarg_accepts_keyword() -> None:
     # The keyword-only ``producer`` argument is part of the public
-    # signature; the stub still errors regardless.
-    with pytest.raises(qirtoqasm.QirToQasmError, match="not yet implemented"):
+    # signature. Passing a value must not raise a TypeError; a
+    # translate-time error is fine — the input here has no entry point.
+    with pytest.raises(qirtoqasm.QirToQasmError):
         qirtoqasm.translate("anything", producer="mylib 0.1.2")
 
 
