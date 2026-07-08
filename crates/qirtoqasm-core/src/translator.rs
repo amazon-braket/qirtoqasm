@@ -3,29 +3,21 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 //! Top-level pipeline: QIR text → [`Module`] → [`Program`] → OpenQASM text.
-//!
-//! The Base Profile end of the pipeline is complete; classical-control
-//! constructs used by the Adaptive Profile (measurement-conditional
-//! branches, phi merges, i1 comparisons and arithmetic, integer-cascade
-//! selects) are recognized by the parser but rejected here with the
-//! pinned `"adaptive profile feature not yet implemented"` error.
 
+use std::collections::HashMap;
+
+use crate::boolean::{
+    lower_binary_i1, lower_icmp_i1, lower_int_arith, lower_phi_i1_short_circuit, lower_select_i1,
+};
 use crate::builders::lower_call;
 use crate::cfg::{lower_cfg, BlockLowering};
 use crate::error::{QirToQasmError, Result};
-use crate::ir::{Block, Instruction, Module};
+use crate::ir::{Block, Instruction, Module, Operand, PhiIncoming};
 use crate::oq3::ast::*;
 use crate::oq3::printer;
 use crate::profile::{base_profile, FunctionBuilder, Profile};
 use crate::signatures::{extract_signatures, SignatureTable};
 use crate::symbols::{SymbolTable, QUBIT_REGISTER, RESULT_REGISTER};
-
-/// Error string returned when the translator encounters a classical-
-/// control-flow shape (icmp, bitwise-i1, select, integer arithmetic,
-/// phi, or measurement-conditional branch) that requires the Adaptive
-/// Profile lowering — scaffolding stub, replaced once that lowering is
-/// in place.
-const ADAPTIVE_STUB: &str = "adaptive profile feature not yet implemented";
 
 /// End-to-end QIR → OpenQASM 3 translator.
 #[derive(Debug, Clone)]
@@ -129,7 +121,7 @@ impl Exporter {
         let block_names = assign_block_names(&entry.blocks);
 
         let mut block_lowerings: Vec<BlockLowering> = Vec::with_capacity(entry.blocks.len());
-        let int_declarations: Vec<Statement> = Vec::new();
+        let mut int_declarations: Vec<Statement> = Vec::new();
         for (i, block) in entry.blocks.iter().enumerate() {
             let canonical = &block_names[i];
             let lowering = self.lower_block(
@@ -138,6 +130,7 @@ impl Exporter {
                 &signatures,
                 &mut symbols,
                 &mut block_lowerings,
+                &mut int_declarations,
             )?;
             block_lowerings.push(lowering);
         }
@@ -170,8 +163,7 @@ impl Exporter {
                 });
             }
         }
-        // Classical int variables introduced by phi-integer lowering
-        // land here once the Adaptive path is filled in.
+        // Classical int variables introduced by phi-integer lowering.
         statements.extend(int_declarations);
         statements.extend(body);
 
@@ -187,10 +179,11 @@ impl Exporter {
         canonical_name: &str,
         signatures: &SignatureTable,
         symbols: &mut SymbolTable,
-        _prior_lowerings: &mut [BlockLowering],
+        prior_lowerings: &mut [BlockLowering],
+        int_declarations: &mut Vec<Statement>,
     ) -> Result<BlockLowering> {
         let mut stmts: Vec<Statement> = Vec::new();
-        let condition: Option<Expression> = None;
+        let mut condition: Option<Expression> = None;
         let mut targets: Vec<String> = Vec::new();
 
         for inst in &block.instructions {
@@ -210,14 +203,10 @@ impl Exporter {
                     let builder = self.profile.get_builder(callee).ok_or_else(|| {
                         if sig.is_variadic {
                             QirToQasmError::unsupported(format!(
-                                "variadic QIR function '{}' is not supported. Some producers \
-                                 emit variadic calls to \
-                                 'generalizedInvokeWithRotationsControlsTargets' for \
-                                 multi-controlled gates (e.g. CCX/Toffoli, CCZ, CY via \
-                                 y.ctrl). These must be decomposed into single- and \
-                                 two-qubit gates before translation. See the qirtoqasm \
-                                 README for the list of supported multi-controlled \
-                                 gate patterns.",
+                                "variadic QIR function '{}' is not supported; only \
+                                 'generalizedInvokeWithRotationsControlsTargets' is; \
+                                 multi-controlled gates must be decomposed into single- \
+                                 and two-qubit gates before translation",
                                 callee
                             ))
                         } else {
@@ -228,10 +217,6 @@ impl Exporter {
                             ))
                         }
                     })?;
-                    // `RecordOutputNoop` and `GeneralizedControlled` handle
-                    // the variadic operand list themselves; other variadic
-                    // callees must be rejected or the default dispatch
-                    // would drop operands past the fixed prefix.
                     let variadic_allowed = matches!(
                         builder,
                         FunctionBuilder::RecordOutputNoop | FunctionBuilder::GeneralizedControlled
@@ -244,10 +229,6 @@ impl Exporter {
                             callee
                         )));
                     }
-                    // For fixed-arity callees, enforce an exact match against
-                    // the declared signature. Variadic callees bypass this
-                    // check since `param_types` only describes the fixed
-                    // prefix.
                     if !sig.is_variadic && args.len() != sig.param_types.len() {
                         return Err(QirToQasmError::unsupported(format!(
                             "arity mismatch calling {:?}: IR supplied {} operand(s) but \
@@ -260,19 +241,84 @@ impl Exporter {
                     let new_stmts = lower_call(builder, sig, args, result.as_deref(), symbols)?;
                     stmts.extend(new_stmts);
                 }
-                // Classical-control shapes require the Adaptive Profile
-                // lowering. Scaffolding stub — replaced once the Adaptive
-                // arms are wired in.
-                Instruction::Icmp(_)
-                | Instruction::BinaryI1 { .. }
-                | Instruction::Select { .. }
-                | Instruction::IntArith { .. }
-                | Instruction::Phi { .. }
-                | Instruction::BrCond { .. } => {
-                    return Err(QirToQasmError::unsupported(ADAPTIVE_STUB));
+                Instruction::Icmp(icmp) => {
+                    lower_icmp_i1(
+                        &icmp.result,
+                        &icmp.predicate.0,
+                        &icmp.lhs,
+                        &icmp.rhs,
+                        symbols,
+                    )?;
+                }
+                Instruction::BinaryI1 {
+                    result,
+                    op,
+                    lhs,
+                    rhs,
+                } => {
+                    lower_binary_i1(result, *op, lhs, rhs, symbols)?;
+                }
+                Instruction::Select {
+                    result,
+                    value_type,
+                    cond,
+                    true_value,
+                    false_value,
+                } => {
+                    lower_select_i1(result, value_type, cond, true_value, false_value, symbols)?;
+                }
+                Instruction::IntArith {
+                    result,
+                    op,
+                    lhs,
+                    rhs,
+                } => {
+                    lower_int_arith(result, *op, lhs, rhs, symbols)?;
+                }
+                Instruction::Phi {
+                    result,
+                    value_type,
+                    incomings,
+                } => {
+                    if value_type == "i1" {
+                        let pred_conditions: HashMap<String, Expression> = prior_lowerings
+                            .iter()
+                            .filter_map(|p| {
+                                p.condition.as_ref().map(|c| (p.name.clone(), c.clone()))
+                            })
+                            .collect();
+                        lower_phi_i1_short_circuit(result, incomings, &pred_conditions, symbols)?;
+                    } else if value_type == "i64" || value_type == "i32" {
+                        lower_phi_integer(
+                            result,
+                            incomings,
+                            prior_lowerings,
+                            int_declarations,
+                            symbols,
+                        )?;
+                    } else {
+                        return Err(QirToQasmError::unsupported(format!(
+                            "phi {value_type} is not yet supported (SSA {result:?}); \
+                             only `phi i1` and `phi i32`/`phi i64` are lowered today"
+                        )));
+                    }
                 }
                 Instruction::Br { target } => {
                     targets.push(target.clone());
+                    break;
+                }
+                Instruction::BrCond {
+                    cond,
+                    true_target,
+                    false_target,
+                } => {
+                    let expr = match cond {
+                        crate::ir::BrCondOperand::Ssa(id) => symbols.lookup_ssa(id)?,
+                        crate::ir::BrCondOperand::Const(b) => Expression::Boolean(*b),
+                    };
+                    condition = Some(expr);
+                    targets.push(true_target.clone());
+                    targets.push(false_target.clone());
                     break;
                 }
                 Instruction::Ret => break,
@@ -291,25 +337,16 @@ impl Exporter {
                     symbols.record_alias(result, src, *offset);
                 }
                 Instruction::Store { value, ptr, .. } => {
-                    // Constant-fold scalar stores into alloca slots. A
-                    // subsequent `load` through any alias of the same
-                    // slot picks up the stored value.
                     symbols.store_to_alloca_slot(ptr, value.clone());
                 }
                 Instruction::Load { result, ptr } => {
                     if let Some(expr) = symbols.load_from_alloca_slot(ptr) {
                         symbols.record_ssa(result, expr);
                     }
-                    // If the slot wasn't constant-folded, leave the SSA
-                    // unbound; downstream uses will fail with the usual
-                    // "SSA not bound" error.
                 }
                 Instruction::Zext { result, src } => {
-                    // `zext i1 %x to iN` promotes a Boolean to its
-                    // integer value (0 or 1). We already treat i1 SSAs
-                    // as integer-valued expressions in arithmetic
-                    // contexts (e.g. `c[N]`), so binding the result to
-                    // the source's existing expression is enough.
+                    // `zext i1 %x to iN` — bind the widened SSA to the source expression,
+                    // which already reads as 0/1 in arithmetic contexts.
                     let expr = symbols.lookup_ssa(src)?;
                     symbols.record_ssa(result, expr);
                 }
@@ -330,6 +367,183 @@ impl Exporter {
     }
 }
 
+/// Lower a `phi i32`/`phi i64` if-merge into an `int` variable
+/// declared at program top plus an assignment on the unconditional
+/// predecessor.
+fn lower_phi_integer(
+    result: &str,
+    incomings: &[PhiIncoming],
+    prior_lowerings: &mut [BlockLowering],
+    int_declarations: &mut Vec<Statement>,
+    symbols: &mut SymbolTable,
+) -> Result<()> {
+    if incomings.len() != 2 {
+        return Err(QirToQasmError::unsupported(format!(
+            "phi integer with {} incoming value(s); only the two-incoming \
+             if-merge shape (`mutable` + conditional increment) is supported",
+            incomings.len()
+        )));
+    }
+
+    if try_bind_phi_i64_landing_pad(result, incomings, prior_lowerings, symbols) {
+        return Ok(());
+    }
+
+    let (uncond_inc, cond_inc) = {
+        let inc0 = &incomings[0];
+        let inc1 = &incomings[1];
+        let pred0 = prior_lowerings
+            .iter()
+            .find(|b| b.name == inc0.pred)
+            .ok_or_else(|| {
+                QirToQasmError::unsupported(format!(
+                    "phi integer predecessor {:?} not found among processed blocks",
+                    inc0.pred
+                ))
+            })?;
+        let pred1 = prior_lowerings
+            .iter()
+            .find(|b| b.name == inc1.pred)
+            .ok_or_else(|| {
+                QirToQasmError::unsupported(format!(
+                    "phi integer predecessor {:?} not found among processed blocks",
+                    inc1.pred
+                ))
+            })?;
+        match (pred0.condition.is_some(), pred1.condition.is_some()) {
+            (true, false) => (inc1, inc0),
+            (false, true) => (inc0, inc1),
+            _ => {
+                return Err(QirToQasmError::unsupported(
+                    "phi integer incomings do not match the expected if-merge \
+                     shape: expected exactly one predecessor with a conditional \
+                     branch (providing the init value) and one with an \
+                     unconditional branch (providing the update value)",
+                ));
+            }
+        }
+    };
+
+    let init_expr = resolve_phi_integer_operand(&cond_inc.value, symbols)?;
+    let update_expr = resolve_phi_integer_operand(&uncond_inc.value, symbols)?;
+
+    // Reuse a prior phi variable when the init side is one.
+    let var_name = match &init_expr {
+        Expression::Identifier(name) if is_declared_int_var(int_declarations, name) => name.clone(),
+        _ => {
+            let name = format!("cint_{}", int_declarations.len());
+            int_declarations.push(Statement::IntDeclaration {
+                name: name.clone(),
+                init: init_expr,
+            });
+            name
+        }
+    };
+
+    if let Some(pred_block) = prior_lowerings
+        .iter_mut()
+        .find(|b| b.name == uncond_inc.pred)
+    {
+        // Skip no-op `var = var;` updates.
+        if !is_identity_update(&update_expr, &var_name) {
+            pred_block.statements.push(Statement::Assignment {
+                target: ident(&var_name),
+                value: update_expr,
+            });
+        }
+    }
+
+    symbols.record_ssa(result, Expression::Identifier(var_name));
+    Ok(())
+}
+
+/// Recognize `phi i64 [A, %bb_t], [B, %bb_f]` where the two preds are
+/// empty unconditional landing pads sharing a conditional-br ancestor
+/// and (A, B) is a permutation of (0, 1). Binds the phi SSA to the
+/// ancestor's predicate (or `1 - predicate` when inverted). Returns
+/// `false` to fall through to the regular if-merge handler.
+fn try_bind_phi_i64_landing_pad(
+    result: &str,
+    incomings: &[PhiIncoming],
+    prior_lowerings: &[BlockLowering],
+    symbols: &mut SymbolTable,
+) -> bool {
+    let as_bit = |op: &Operand| -> Option<bool> {
+        match op {
+            Operand::ConstInt(0) => Some(false),
+            Operand::ConstInt(1) => Some(true),
+            Operand::ConstBool(b) => Some(*b),
+            _ => None,
+        }
+    };
+    let v0 = as_bit(&incomings[0].value);
+    let v1 = as_bit(&incomings[1].value);
+    let (v0, _v1) = match (v0, v1) {
+        (Some(a), Some(b)) if a != b => (a, b),
+        _ => return false,
+    };
+
+    let pred0_name = &incomings[0].pred;
+    let pred1_name = &incomings[1].pred;
+    let is_landing_pad = |name: &str| {
+        prior_lowerings
+            .iter()
+            .find(|b| b.name == name)
+            .map(|b| b.condition.is_none() && b.statements.is_empty() && b.targets.len() == 1)
+            .unwrap_or(false)
+    };
+    if !is_landing_pad(pred0_name) || !is_landing_pad(pred1_name) {
+        return false;
+    }
+
+    let ancestor = prior_lowerings.iter().find(|b| {
+        b.condition.is_some()
+            && b.targets.len() == 2
+            && b.targets.contains(pred0_name)
+            && b.targets.contains(pred1_name)
+    });
+    let Some(ancestor) = ancestor else {
+        return false;
+    };
+    let cond_expr = ancestor.condition.clone().expect("checked above");
+    let true_target = &ancestor.targets[0];
+    let true_value = if pred0_name == true_target { v0 } else { _v1 };
+
+    let bound = if true_value {
+        cond_expr
+    } else {
+        // Inverted: emit `1 - <pred>` to keep the result integer-typed.
+        bin(BinaryOp::Sub, int(1), cond_expr)
+    };
+    symbols.record_ssa(result, bound);
+    true
+}
+
+fn resolve_phi_integer_operand(op: &Operand, symbols: &SymbolTable) -> Result<Expression> {
+    match op {
+        Operand::ConstInt(n) => i64::try_from(*n).map(Expression::Integer).map_err(|_| {
+            QirToQasmError::unsupported(format!(
+                "phi integer incoming constant {n} does not fit in i64"
+            ))
+        }),
+        Operand::ConstBool(b) => Ok(Expression::Integer(if *b { 1 } else { 0 })),
+        Operand::Ssa(id) => symbols.lookup_ssa(id),
+        _ => Err(QirToQasmError::unsupported(format!(
+            "phi integer incoming must be a constant or SSA reference, got {op:?}"
+        ))),
+    }
+}
+
+fn is_declared_int_var(int_declarations: &[Statement], name: &str) -> bool {
+    int_declarations
+        .iter()
+        .any(|s| matches!(s, Statement::IntDeclaration { name: n, .. } if n == name))
+}
+
+fn is_identity_update(expr: &Expression, var_name: &str) -> bool {
+    matches!(expr, Expression::Identifier(n) if n == var_name)
+}
+
 fn assign_block_names(blocks: &[Block]) -> Vec<String> {
     let mut out = Vec::with_capacity(blocks.len());
     for (i, b) in blocks.iter().enumerate() {
@@ -344,9 +558,8 @@ fn assign_block_names(blocks: &[Block]) -> Vec<String> {
     out
 }
 
-/// JSON-escape `s` into `buf` — quote, backslash, and ASCII control
-/// characters only. Enough to keep the trailing `// generated-by:`
-/// comment on a single well-formed line.
+/// JSON-escape `s` into `buf`. Handles quote, backslash, and ASCII
+/// control characters — enough for the `// generated-by:` line.
 fn json_escape_into(s: &str, buf: &mut String) {
     for c in s.chars() {
         match c {
@@ -591,6 +804,35 @@ attributes #0 = { \"entry_point\" }
         let out = Exporter::new().dumps(&module).unwrap();
         assert!(out.contains("h q[0]"), "{out}");
     }
+
+    #[test]
+    fn constant_branch_condition_propagates_to_oq3_boolean_literal() {
+        // br i1 1 takes the true path; br i1 0 takes the false path.
+        // Exercising this confirms the BrCondOperand::Const variant
+        // reaches Expression::Boolean.
+        let ir = "\
+%Qubit = type opaque
+define void @main() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  br i1 1, label %t, label %f
+t:
+  call void @__quantum__qis__x__body(%Qubit* null)
+  br label %join
+f:
+  call void @__quantum__qis__z__body(%Qubit* null)
+  br label %join
+join:
+  ret void
+}
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__x__body(%Qubit*)
+declare void @__quantum__qis__z__body(%Qubit*)
+attributes #0 = { \"entry_point\" }
+";
+        let module = parse_module(ir).unwrap();
+        let out = Exporter::new().dumps(&module).unwrap();
+        assert!(out.contains("if (true)"), "{out}");
+    }
 }
 
 #[cfg(test)]
@@ -631,11 +873,203 @@ mod more_fine_tests {
 }
 
 #[cfg(test)]
+mod new_lowering_dispatch {
+    //! End-to-end coverage for the `And` / `Or` / `Select` / `IntArith`
+    //! instruction-dispatch arms and the variadic-unregistered-callee
+    //! error path. Each fixture is a minimal adaptive-profile QIR module
+    //! that exercises exactly one new instruction variant and asserts
+    //! the translator binds the result SSA into the resulting `if`
+    //! condition.
+
+    use super::*;
+    use crate::ir::parser::parse_module;
+
+    fn translate(ll: &str) -> String {
+        let module = parse_module(ll).unwrap();
+        Exporter::new().dumps(&module).unwrap()
+    }
+
+    #[test]
+    fn and_i1_flows_into_if_condition() {
+        let ll = "\
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__h__body(%Qubit* inttoptr (i64 1 to %Qubit*))
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  call void @__quantum__qis__mz__body(%Qubit* inttoptr (i64 1 to %Qubit*), %Result* inttoptr (i64 1 to %Result*))
+  %a = call i1 @__quantum__qis__read_result__body(%Result* null)
+  %b = call i1 @__quantum__qis__read_result__body(%Result* inttoptr (i64 1 to %Result*))
+  %c = and i1 %a, %b
+  br i1 %c, label %then, label %end
+then:
+  call void @__quantum__qis__x__body(%Qubit* inttoptr (i64 2 to %Qubit*))
+  br label %end
+end:
+  call void @__quantum__qis__mz__body(%Qubit* inttoptr (i64 2 to %Qubit*), %Result* inttoptr (i64 2 to %Result*))
+  ret void
+}
+
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__x__body(%Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__qis__read_result__body(%Result*)
+
+attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"3\" \"requiredResults\"=\"3\" }
+attributes #1 = { \"irreversible\" }
+";
+        let out = translate(ll);
+        assert!(out.contains("if (c[0] == 1 && c[1] == 1)"), "{out}");
+    }
+
+    #[test]
+    fn or_i1_flows_into_if_condition() {
+        let ll = "\
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__h__body(%Qubit* inttoptr (i64 1 to %Qubit*))
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  call void @__quantum__qis__mz__body(%Qubit* inttoptr (i64 1 to %Qubit*), %Result* inttoptr (i64 1 to %Result*))
+  %a = call i1 @__quantum__qis__read_result__body(%Result* null)
+  %b = call i1 @__quantum__qis__read_result__body(%Result* inttoptr (i64 1 to %Result*))
+  %c = or i1 %a, %b
+  br i1 %c, label %then, label %end
+then:
+  call void @__quantum__qis__x__body(%Qubit* inttoptr (i64 2 to %Qubit*))
+  br label %end
+end:
+  call void @__quantum__qis__mz__body(%Qubit* inttoptr (i64 2 to %Qubit*), %Result* inttoptr (i64 2 to %Result*))
+  ret void
+}
+
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__x__body(%Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__qis__read_result__body(%Result*)
+
+attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"3\" \"requiredResults\"=\"3\" }
+attributes #1 = { \"irreversible\" }
+";
+        let out = translate(ll);
+        assert!(out.contains("if (c[0] == 1 || c[1] == 1)"), "{out}");
+    }
+
+    #[test]
+    fn select_i1_flows_into_if_condition() {
+        // Emits the compiler short-circuit shape `select i1 %a, i1 %b, i1 false`
+        // (`a && b`), which the lowering recognizes and reduces to `a && b`.
+        let ll = "\
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__h__body(%Qubit* inttoptr (i64 1 to %Qubit*))
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  call void @__quantum__qis__mz__body(%Qubit* inttoptr (i64 1 to %Qubit*), %Result* inttoptr (i64 1 to %Result*))
+  %a = call i1 @__quantum__qis__read_result__body(%Result* null)
+  %b = call i1 @__quantum__qis__read_result__body(%Result* inttoptr (i64 1 to %Result*))
+  %c = select i1 %a, i1 %b, i1 false
+  br i1 %c, label %then, label %end
+then:
+  call void @__quantum__qis__x__body(%Qubit* inttoptr (i64 2 to %Qubit*))
+  br label %end
+end:
+  call void @__quantum__qis__mz__body(%Qubit* inttoptr (i64 2 to %Qubit*), %Result* inttoptr (i64 2 to %Result*))
+  ret void
+}
+
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__x__body(%Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__qis__read_result__body(%Result*)
+
+attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"3\" \"requiredResults\"=\"3\" }
+attributes #1 = { \"irreversible\" }
+";
+        let out = translate(ll);
+        assert!(out.contains("if (c[0] == 1 && c[1] == 1)"), "{out}");
+    }
+
+    #[test]
+    fn int_arith_add_flows_into_icmp_comparison() {
+        // Exercises the IntArith dispatch arm plus an `icmp ult` ordered
+        // predicate. The `add` result is inlined into the comparison, so
+        // the emitted OpenQASM should contain a `... + 1 < ...` expression
+        // inside the `if` condition.
+        let ll = "\
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  %a = call i1 @__quantum__qis__read_result__body(%Result* null)
+  %b = add i32 0, 1
+  %c = icmp ult i32 %b, 3
+  br i1 %c, label %then, label %end
+then:
+  call void @__quantum__qis__x__body(%Qubit* inttoptr (i64 1 to %Qubit*))
+  br label %end
+end:
+  call void @__quantum__qis__mz__body(%Qubit* inttoptr (i64 1 to %Qubit*), %Result* inttoptr (i64 1 to %Result*))
+  ret void
+}
+
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__x__body(%Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__qis__read_result__body(%Result*)
+
+attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"2\" \"requiredResults\"=\"2\" }
+attributes #1 = { \"irreversible\" }
+";
+        let out = translate(ll);
+        assert!(out.contains("if (0 + 1 < 3)"), "{out}");
+    }
+
+    #[test]
+    fn unregistered_variadic_callee_surfaces_descriptive_error() {
+        // A variadic callee with no registered builder is rejected with
+        // an error naming the callee and mentioning the variadic-multi-
+        // controlled idiom that motivates the check.
+        let ll = "\
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+  call void (i64, i64, ...) @someUnknownVariadic(i64 0, i64 0)
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  ret void
+}
+
+declare void @someUnknownVariadic(i64, i64, ...)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+
+attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"1\" \"requiredResults\"=\"1\" }
+attributes #1 = { \"irreversible\" }
+";
+        let err = parse_module(ll)
+            .and_then(|m| Exporter::new().dumps(&m))
+            .unwrap_err();
+        assert!(err.to_string().contains("someUnknownVariadic"));
+        assert!(err
+            .to_string()
+            .contains("generalizedInvokeWithRotationsControlsTargets"));
+    }
+}
+
+#[cfg(test)]
 mod new_lowering_tests {
-    //! Direct Rust coverage for the Base-Profile alloca/store/load,
-    //! struct-by-value, and mresetz-order paths. Python tests exercise
-    //! the same code but go through the PyO3 wheel; `cargo llvm-cov`
-    //! only counts Rust-level coverage.
+    //! Direct Rust coverage for the phi-i64, select-integer,
+    //! alloca/store/load, and Zext lowering paths. Python tests
+    //! exercise the same code but go through the PyO3 wheel;
+    //! `cargo llvm-cov` only counts Rust-level coverage.
 
     fn translate(ll: &str) -> crate::Result<String> {
         crate::translate(ll, &crate::TranslateOptions::default())
@@ -740,6 +1174,377 @@ attributes #1 = { "irreversible" }
         let r = qasm.find("reset q[0];").unwrap();
         let x = qasm.find("x q[0];").unwrap();
         assert!(m < r && r < x, "\n{qasm}");
+    }
+
+    #[test]
+    fn phi_i64_if_merge_emits_int_declaration() {
+        let ll = r#"
+%Result = type opaque
+%Qubit = type opaque
+
+define i64 @main() #0 {
+entry:
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  %c = call i1 @__quantum__rt__read_result(%Result* null)
+  br i1 %c, label %inc, label %done
+inc:
+  br label %done
+done:
+  %count = phi i64 [0, %entry], [1, %inc]
+  ret i64 0
+}
+
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__rt__read_result(%Result*)
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="1" "requiredResults"="1" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(ll).unwrap();
+        assert!(qasm.contains("int cint_0 = 0;"), "\n{qasm}");
+        assert!(qasm.contains("cint_0 = 1;"), "\n{qasm}");
+    }
+
+    #[test]
+    fn phi_i32_same_lowering_as_i64() {
+        let ll = r#"
+%Result = type opaque
+%Qubit = type opaque
+
+define void @main() #0 {
+entry:
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  %c = call i1 @__quantum__rt__read_result(%Result* null)
+  br i1 %c, label %inc, label %done
+inc:
+  br label %done
+done:
+  %count = phi i32 [0, %entry], [1, %inc]
+  ret void
+}
+
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__rt__read_result(%Result*)
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="1" "requiredResults"="1" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(ll).unwrap();
+        assert!(qasm.contains("int cint_0 = 0;"), "\n{qasm}");
+    }
+
+    #[test]
+    fn phi_with_three_incomings_errors() {
+        let ll = r#"
+%Qubit = type opaque
+
+define void @main() #0 {
+entry:
+  call void @__quantum__qis__h__body(%Qubit* null)
+  br label %done
+mid:
+  br label %done
+other:
+  br label %done
+done:
+  %bad = phi i64 [0, %entry], [1, %mid], [2, %other]
+  ret void
+}
+declare void @__quantum__qis__h__body(%Qubit*)
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="1" "requiredResults"="0" }
+"#;
+        let err = translate(ll).unwrap_err();
+        assert!(
+            err.to_string().contains("if-merge shape"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn phi_with_two_unconditional_predecessors_errors() {
+        let ll = r#"
+%Qubit = type opaque
+
+define void @main() #0 {
+entry:
+  br label %a
+a:
+  br label %done
+done:
+  %bad = phi i64 [0, %entry], [1, %a]
+  ret void
+}
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="0" "requiredResults"="0" }
+"#;
+        let err = translate(ll).unwrap_err();
+        assert!(
+            err.to_string().contains("if-merge shape"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn phi_with_bogus_value_type_errors() {
+        let ll = r#"
+%Result = type opaque
+%Qubit = type opaque
+
+define void @main() #0 {
+entry:
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  %c = call i1 @__quantum__rt__read_result(%Result* null)
+  br i1 %c, label %inc, label %done
+inc:
+  br label %done
+done:
+  %bad = phi i8 [0, %entry], [1, %inc]
+  ret void
+}
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__rt__read_result(%Result*)
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="1" "requiredResults"="1" }
+attributes #1 = { "irreversible" }
+"#;
+        let err = translate(ll).unwrap_err();
+        assert!(err.to_string().contains("phi i8"), "{err}");
+    }
+
+    #[test]
+    fn select_i32_lowers_to_inline_arithmetic() {
+        let ll = r#"
+%Result = type opaque
+%Qubit = type opaque
+
+define void @main() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  %c = call i1 @__quantum__rt__read_result(%Result* null)
+  %v = select i1 %c, i32 5, i32 3
+  %chk = icmp sge i32 %v, 4
+  br i1 %chk, label %t, label %f
+t:
+  call void @__quantum__qis__x__body(%Qubit* inttoptr (i64 1 to %Qubit*))
+  br label %f
+f:
+  ret void
+}
+
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__x__body(%Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__rt__read_result(%Result*)
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="2" "requiredResults"="1" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(ll).unwrap();
+        assert!(qasm.contains("c[0] * 5"), "\n{qasm}");
+        assert!(qasm.contains("(1 - c[0]) * 3"), "\n{qasm}");
+        assert!(qasm.contains(">= 4"), "\n{qasm}");
+    }
+
+    #[test]
+    fn zext_i1_to_int_aliases_ssa() {
+        let ll = r#"
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  %c = call i1 @__quantum__rt__read_result(%Result* null)
+  %ci = zext i1 %c to i32
+  %chk = icmp sge i32 %ci, 1
+  br i1 %chk, label %t, label %f
+t:
+  call void @__quantum__qis__x__body(%Qubit* inttoptr (i64 1 to %Qubit*))
+  br label %f
+f:
+  ret void
+}
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__x__body(%Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__rt__read_result(%Result*)
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="2" "requiredResults"="1" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(ll).unwrap();
+        // The `zext` result flows into `icmp sge, 1` which becomes
+        // `c[0] >= 1` (or `c[0] == 1`) in the if condition.
+        assert!(qasm.contains("c[0]"), "\n{qasm}");
+    }
+
+    /// `phi i64 [1, bb_true], [0, bb_false]` where both predecessors are
+    /// empty unconditional landing pads sharing a common `br i1` ancestor
+    /// lowers to the predicate expression itself (widened to i64).
+    #[test]
+    fn phi_i64_landing_pad_binds_to_predicate_c_bit() {
+        let ll = r#"
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+entry:
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  %b = call i1 @__quantum__rt__read_result(%Result* null)
+  br i1 %b, label %bb_t, label %bb_f
+bb_t:
+  br label %merge
+bb_f:
+  br label %merge
+merge:
+  %w = phi i64 [1, %bb_t], [0, %bb_f]
+  %cmp = icmp eq i64 %w, 1
+  br i1 %cmp, label %then, label %join
+then:
+  call void @__quantum__qis__x__body(%Qubit* inttoptr (i64 1 to %Qubit*))
+  br label %join
+join:
+  call void @__quantum__qis__mz__body(%Qubit* inttoptr (i64 1 to %Qubit*), %Result* inttoptr (i64 1 to %Result*))
+  ret void
+}
+
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__x__body(%Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__rt__read_result(%Result*)
+
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="2" "requiredResults"="2" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(ll).unwrap();
+        assert!(
+            qasm.contains("if (c[0] == 1) {\n  x q[1];\n}")
+                || qasm.contains("if (c[0]) {\n  x q[1];\n}"),
+            "\n{qasm}"
+        );
+        assert!(
+            !qasm.contains("cint_"),
+            "should not allocate an int variable"
+        );
+    }
+
+    /// Same CFG shape but with the incomings swapped: `[0, bb_t], [1, bb_f]`.
+    /// The phi value is `1 - predicate`, so the downstream `icmp eq i64 %w, 1`
+    /// collapses to `(1 - c[0]) == 1`.
+    #[test]
+    fn phi_i64_landing_pad_inverted_incomings_negates_predicate() {
+        let ll = r#"
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+entry:
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  %b = call i1 @__quantum__rt__read_result(%Result* null)
+  br i1 %b, label %bb_t, label %bb_f
+bb_t:
+  br label %merge
+bb_f:
+  br label %merge
+merge:
+  %w = phi i64 [0, %bb_t], [1, %bb_f]
+  %cmp = icmp eq i64 %w, 1
+  br i1 %cmp, label %then, label %join
+then:
+  call void @__quantum__qis__x__body(%Qubit* inttoptr (i64 1 to %Qubit*))
+  br label %join
+join:
+  ret void
+}
+
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__x__body(%Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__rt__read_result(%Result*)
+
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="2" "requiredResults"="1" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(ll).unwrap();
+        assert!(
+            qasm.contains("if (1 - c[0] == 1) {\n  x q[1];\n}")
+                || qasm.contains("if ((1 - c[0]) == 1) {\n  x q[1];\n}"),
+            "\n{qasm}"
+        );
+    }
+
+    /// Landing-pad shape with non-{0,1} incoming constants falls through to
+    /// the existing unsupported error.
+    #[test]
+    fn phi_i64_landing_pad_non_binary_constants_still_errors() {
+        let ll = r#"
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+entry:
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  %b = call i1 @__quantum__rt__read_result(%Result* null)
+  br i1 %b, label %bb_t, label %bb_f
+bb_t:
+  br label %merge
+bb_f:
+  br label %merge
+merge:
+  %w = phi i64 [5, %bb_t], [7, %bb_f]
+  ret void
+}
+
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__rt__read_result(%Result*)
+
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="1" "requiredResults"="1" }
+attributes #1 = { "irreversible" }
+"#;
+        let err = translate(ll).unwrap_err();
+        assert!(err.to_string().contains("if-merge shape"), "{err}");
+    }
+
+    #[test]
+    fn struct_return_type_with_malloc_and_insertvalue_translates() {
+        let ll = r#"
+%Qubit = type opaque
+%Result = type opaque
+
+declare i8* @malloc(i64)
+declare void @free(i8*)
+declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64, i1)
+
+define { i1*, i64 } @__nvqpp__mlirgen__kernel() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__cnot__body(%Qubit* null, %Qubit* inttoptr (i64 1 to %Qubit*))
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  call void @__quantum__rt__result_record_output(%Result* null, i8* null)
+  call void @__quantum__qis__mz__body(%Qubit* inttoptr (i64 1 to %Qubit*), %Result* inttoptr (i64 1 to %Result*))
+  call void @__quantum__rt__result_record_output(%Result* inttoptr (i64 1 to %Result*), i8* null)
+  %1 = alloca [2 x i8], align 1
+  %2 = bitcast [2 x i8]* %1 to i8*
+  %3 = call i8* @malloc(i64 2)
+  call void @llvm.memcpy.p0i8.p0i8.i64(i8* %3, i8* %2, i64 2, i1 false)
+  %4 = bitcast i8* %3 to i1*
+  %5 = insertvalue { i1*, i64 } undef, i1* %4, 0
+  %6 = insertvalue { i1*, i64 } %5, i64 2, 1
+  ret { i1*, i64 } %6
+}
+
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__cnot__body(%Qubit*, %Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare void @__quantum__rt__result_record_output(%Result*, i8*)
+
+attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="2" "requiredResults"="2" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(ll).unwrap();
+        assert!(qasm.contains("h q[0];"), "\n{qasm}");
+        assert!(qasm.contains("cnot q[0], q[1];"), "\n{qasm}");
+        assert!(qasm.contains("c[0] = measure q[0];"), "\n{qasm}");
+        assert!(qasm.contains("c[1] = measure q[1];"), "\n{qasm}");
     }
 }
 
