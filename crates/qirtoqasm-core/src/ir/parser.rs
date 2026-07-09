@@ -62,12 +62,14 @@ pub fn parse_module(text: &str) -> Result<Module> {
         match item {
             ParsedItem::Decl(f) => functions.push(f),
             ParsedItem::Define(mut pf) => {
-                if !pf.is_entry_point {
-                    for gid in std::mem::take(&mut pf.pending_group_refs) {
-                        if let Some(body) = attr_groups.get(&gid) {
-                            if body.contains("entry_point") {
-                                pf.is_entry_point = true;
-                            }
+                let mut qir_profile: Option<String> = None;
+                for gid in std::mem::take(&mut pf.pending_group_refs) {
+                    if let Some(body) = attr_groups.get(&gid) {
+                        if !pf.is_entry_point && body.contains("entry_point") {
+                            pf.is_entry_point = true;
+                        }
+                        if qir_profile.is_none() {
+                            qir_profile = extract_qir_profile(body);
                         }
                     }
                 }
@@ -75,6 +77,7 @@ pub fn parse_module(text: &str) -> Result<Module> {
                     name: pf.name,
                     is_declaration: pf.is_declaration,
                     is_entry_point: pf.is_entry_point,
+                    qir_profile,
                     blocks: pf.blocks,
                 });
             }
@@ -162,6 +165,15 @@ fn parse_attribute_group(rest: &str) -> Option<(u32, String)> {
     Some((num?, rest[..end].to_string()))
 }
 
+/// Extract the `"qir_profiles"="<value>"` value from an attribute
+/// group body, if present.
+fn extract_qir_profile(body: &str) -> Option<String> {
+    const KEY: &str = "\"qir_profiles\"=\"";
+    let start = body.find(KEY)? + KEY.len();
+    let end = body[start..].find('"')?;
+    Some(body[start..start + end].to_string())
+}
+
 fn split_u32(s: &str) -> (Option<u32>, &str) {
     let end = s
         .bytes()
@@ -191,6 +203,7 @@ fn parse_declare(p: &mut Parser<'_>) -> Result<Function> {
         name,
         is_declaration: true,
         is_entry_point: false,
+        qir_profile: None,
         blocks: vec![],
     })
 }
@@ -613,7 +626,7 @@ fn parse_call(result: Option<String>, args: &str) -> Result<Instruction> {
     // with a function-type list, e.g.
     //   call void (i64, ..., i8*, ...) @generalizedInvoke(...)
     // We detect and skip that prefix parenthesised group so the `@name`
-    // that follows is recognised as the callee.
+    // that follows is recognized as the callee.
     let mut rest = args;
     let return_type = first_token(rest);
     rest = after_token(rest);
@@ -670,7 +683,7 @@ fn parse_operand(chunk: &str) -> Result<Operand> {
         return Err(QirToQasmError::syntax("unexpected ... in operand"));
     }
 
-    // Recognise `getelementptr inbounds (...)` verbose form used in QIR for
+    // Recognize `getelementptr inbounds (...)` verbose form used in QIR for
     // string constants referenced from `*_record_output` calls.
     if chunk.starts_with("getelementptr") {
         return Ok(Operand::GetElementPtr);
@@ -1210,10 +1223,10 @@ fn parse_zext(result: Option<String>, args: &str) -> Option<Instruction> {
 }
 
 // ---------------------------------------------------------------------------
-// alloca / bitcast / getelementptr / load / store — minimal recognisers
+// alloca / bitcast / getelementptr / load / store — minimal recognizers
 // for the array-of-scratch idiom (alloca an array, store constants,
 // bitcast / gep to element pointers, load back). Shapes that don't match
-// the recogniser fall through to `Instruction::Ignored` via `unwrap_or`
+// the recognizer fall through to `Instruction::Ignored` via `unwrap_or`
 // at the call site.
 // ---------------------------------------------------------------------------
 
@@ -1237,7 +1250,7 @@ fn parse_bitcast(result: Option<String>, args: &str) -> Option<Instruction> {
 
 /// Parse `%r = getelementptr [inbounds] <ty>, <ty>* %src, i32 0, i32 <offset>`.
 /// Only the `i32 0 / i64 0` first-index plus a constant second-index
-/// shape is recognised; anything else falls through to `Ignored`.
+/// shape is recognized; anything else falls through to `Ignored`.
 fn parse_getelementptr(result: Option<String>, args: &str) -> Option<Instruction> {
     let result = result?;
     let rest = strip_trailing_comment(args).trim();
@@ -2149,7 +2162,7 @@ attributes #0 = { \"entry_point\" }
     }
 
     #[test]
-    fn pointer_operand_with_unrecognised_value_errors() {
+    fn pointer_operand_with_unrecognized_value_errors() {
         let err = parse_operand("ptr garbage").unwrap_err();
         assert!(err
             .to_string()
@@ -2176,7 +2189,7 @@ attributes #0 = { \"entry_point\" }
     }
 
     #[test]
-    fn call_parser_recognises_tail_call_qualifiers() {
+    fn call_parser_recognizes_tail_call_qualifiers() {
         // Tail-call qualifiers followed by the call opcode.
         let instr =
             parse_instruction_line("musttail call void @__quantum__qis__h__body(%Qubit* null)")
@@ -2309,9 +2322,9 @@ attributes #1 = { "irreversible" }
 
     /// Full module fixture exercising the memory-family opcodes
     /// (`alloca`, `bitcast`, `getelementptr`, `store`, `load`). These
-    /// are recognisers: shapes that don't match the expected form fall
+    /// are recognizers: shapes that don't match the expected form fall
     /// through to `Instruction::Ignored`. This fixture uses the shapes
-    /// the recognisers accept.
+    /// the recognizers accept.
     const MEMORY_INSTRUCTIONS_MODULE: &str = r#"
 define void @main() #0 {
 entry:

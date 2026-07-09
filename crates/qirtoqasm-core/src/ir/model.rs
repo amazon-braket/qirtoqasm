@@ -32,6 +32,9 @@ pub struct Function {
     pub is_declaration: bool,
     /// `true` if any attribute on the function contains `entry_point`.
     pub is_entry_point: bool,
+    /// Value of the `"qir_profiles"` attribute if the function declares
+    /// one (e.g. `"base_profile"`, `"adaptive_profile"`), else `None`.
+    pub qir_profile: Option<String>,
     /// Basic blocks in source order. Empty for declarations.
     pub blocks: Vec<Block>,
 }
@@ -45,7 +48,7 @@ pub struct Block {
     pub instructions: Vec<Instruction>,
 }
 
-/// The LLVM instructions the translator recognises.
+/// The LLVM instructions the translator recognizes.
 ///
 /// Opcodes not listed here land as [`Instruction::Ignored`] (memory/plumbing
 /// we deliberately skip) or surface at translation time as
@@ -154,7 +157,7 @@ pub enum Instruction {
     },
     /// `%result = getelementptr <ty>, <ty>* <src>, i32 0, i32 <offset>` —
     /// cudaq's idiom for indexing into an alloca'd array. We only
-    /// recognise the two-index form with a leading `0`.
+    /// recognize the two-index form with a leading `0`.
     GetElementPtrOffset {
         /// SSA id assigned by the gep.
         result: String,
@@ -329,6 +332,7 @@ mod tests {
                 name: "main".into(),
                 is_declaration: false,
                 is_entry_point: true,
+                qir_profile: None,
                 blocks: vec![Block {
                     name: "entry".into(),
                     instructions: vec![
@@ -409,6 +413,7 @@ mod tests {
                 name: "f".into(),
                 is_declaration: true,
                 is_entry_point: false,
+                qir_profile: None,
                 blocks: vec![],
             }],
         };

@@ -4,8 +4,8 @@
 #             CUDA-Q. 3 OS × 3 Py.
 # msrv      — rust 1.75 build + test on Ubuntu.
 #
-# Coverage, integ-* (braket / qsharp / cudaq / golden), and the C/C++
-# smoke jobs are added in the PRs that ship their respective code.
+# integ-* (braket / qsharp / cudaq / golden) and the C/C++ smoke jobs
+# land alongside the code they exercise.
 
 name: CI
 
@@ -89,3 +89,21 @@ jobs:
         run: cargo build --locked
       - name: cargo test (core + ffi)
         run: cargo test -p qirtoqasm-core -p qirtoqasm-ffi --locked
+
+  coverage:
+    name: Coverage (qirtoqasm-core ≥ 97 %)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: cargo llvm-cov (fail under 97 % lines)
+        run: >
+          cargo llvm-cov --package qirtoqasm-core
+          --ignore-filename-regex '.*test_support\.rs$'
+          --fail-under-lines 97
+          --locked
