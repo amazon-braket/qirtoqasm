@@ -11,10 +11,33 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 
-"""Shared fixtures for the qirtoqasm Python test suite.
-
-Minimal scaffolding while the core translator is still a stub. The
-full helper set is added once the real PyO3 binding is in place.
-"""
+"""Shared fixtures for the qirtoqasm Python test suite."""
 
 from __future__ import annotations
+
+import textwrap
+
+import pytest
+
+import qirtoqasm
+
+
+def dedent(ir: str) -> str:
+    """Normalize a multi-line IR literal for test use."""
+    return textwrap.dedent(ir).strip() + "\n"
+
+
+@pytest.fixture
+def translate():
+    """Return a helper that translates a QIR snippet and strips trailing whitespace.
+
+    Keeps test code tight::
+
+        def test_foo(translate):
+            assert "h q[0];" in translate(IR)
+    """
+
+    def _translate(ir: str) -> str:
+        return qirtoqasm.translate(dedent(ir)).strip()
+
+    return _translate
