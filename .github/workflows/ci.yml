@@ -107,3 +107,51 @@ jobs:
           --ignore-filename-regex '.*test_support\.rs$'
           --fail-under-lines 97
           --locked
+
+  cpp-smoke:
+    name: C++ smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Configure
+        run: cmake -B build -S . -DQIRTOQASM_BUILD_CPP_TESTS=ON
+      - name: Build
+        run: cmake --build build --target qirtoqasm_cpp_smoke --config Release
+      - name: Run
+        shell: bash
+        run: |
+          if [ -x build/qirtoqasm_cpp_smoke ]; then
+            ./build/qirtoqasm_cpp_smoke
+          else
+            ./build/Release/qirtoqasm_cpp_smoke.exe
+          fi
+
+  c-smoke:
+    name: C smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Configure
+        run: cmake -B build -S . -DQIRTOQASM_BUILD_C_TESTS=ON
+      - name: Build
+        run: cmake --build build --target qirtoqasm_c_smoke --config Release
+      - name: Run
+        shell: bash
+        run: |
+          if [ -x build/qirtoqasm_c_smoke ]; then
+            ./build/qirtoqasm_c_smoke
+          else
+            ./build/Release/qirtoqasm_c_smoke.exe
+          fi
