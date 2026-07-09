@@ -41,11 +41,26 @@ endif()
 
 set(QIRTOQASM_CARGO_TARGET_DIR "${CARGO_BUILD_DIR}/${CARGO_PROFILE}")
 
+# On Linux, ask rustc to embed a SONAME in the cdylib so consumers'
+# DT_NEEDED records a bare filename instead of the .so path. Without
+# this the recorded path contains slashes, which per ld.so bypasses
+# RPATH search at runtime.
+if(UNIX AND NOT APPLE)
+    set(QIRTOQASM_CARGO_ENV
+        CARGO_TARGET_DIR=${CARGO_BUILD_DIR}
+        RUSTFLAGS=-Clink-arg=-Wl,-soname,libqirtoqasm.so
+    )
+else()
+    set(QIRTOQASM_CARGO_ENV
+        CARGO_TARGET_DIR=${CARGO_BUILD_DIR}
+    )
+endif()
+
 add_custom_command(
     OUTPUT
         "${QIRTOQASM_CARGO_TARGET_DIR}/${QIRTOQASM_STATIC_NAME}"
         "${QIRTOQASM_CARGO_TARGET_DIR}/${QIRTOQASM_SHARED_NAME}"
-    COMMAND ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_BUILD_DIR}
+    COMMAND ${CMAKE_COMMAND} -E env ${QIRTOQASM_CARGO_ENV}
         cargo build ${CARGO_PROFILE_FLAG} -p qirtoqasm-ffi
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Building qirtoqasm-ffi (cargo ${CARGO_PROFILE})"
@@ -79,15 +94,6 @@ if(WIN32)
     # alongside the DLL — CMake enforces this at generate time.
     set_target_properties(qirtoqasm_shared PROPERTIES
         IMPORTED_IMPLIB "${QIRTOQASM_CARGO_TARGET_DIR}/${QIRTOQASM_IMPORTLIB_NAME}"
-    )
-elseif(UNIX AND NOT APPLE)
-    # On ELF systems, the linker records IMPORTED_LOCATION verbatim as
-    # DT_NEEDED unless IMPORTED_SONAME is set. If the recorded string
-    # contains a slash, the runtime loader treats it as a literal path
-    # and never consults RPATH. Record the bare filename here so that
-    # BUILD_RPATH (below) actually gets consulted at runtime.
-    set_target_properties(qirtoqasm_shared PROPERTIES
-        IMPORTED_SONAME "${QIRTOQASM_SHARED_NAME}"
     )
 endif()
 
