@@ -84,20 +84,24 @@ impl Exporter {
     pub fn dumps(&self, module: &Module) -> Result<String> {
         let program = self.build_program(module)?;
         let mut out = printer::print(&program);
-        out.push_str(&self.generated_by_line());
+        let input_profile = module.entry_point().and_then(|f| f.qir_profile.clone());
+        out.push_str(&self.generated_by_line(input_profile.as_deref()));
         Ok(out)
     }
 
     /// Render the trailing `// generated-by: {…}` line. Keys: `name`,
-    /// `version`, then `profile`, then optionally `producer`.
-    fn generated_by_line(&self) -> String {
+    /// `version`, then optionally `profile` (the input QIR profile),
+    /// then optionally `producer`.
+    fn generated_by_line(&self, input_profile: Option<&str>) -> String {
         let mut s = String::from("// generated-by: {");
         s.push_str(r#""name":"qirtoqasm","version":""#);
         json_escape_into(crate::VERSION, &mut s);
         s.push('"');
-        s.push_str(r#","profile":""#);
-        json_escape_into(&self.profile.name, &mut s);
-        s.push('"');
+        if let Some(p) = input_profile {
+            s.push_str(r#","profile":""#);
+            json_escape_into(p, &mut s);
+            s.push('"');
+        }
         if let Some(p) = &self.producer {
             s.push_str(r#","producer":""#);
             json_escape_into(p, &mut s);
@@ -280,6 +284,13 @@ impl Exporter {
                     value_type,
                     incomings,
                 } => {
+                    if let Some(inc) = incomings.iter().find(|i| i.pred == canonical_name) {
+                        return Err(QirToQasmError::unsupported(format!(
+                            "loop-carried phi (predecessor {:?} is the phi's own block \
+                             {:?}) is not supported",
+                            inc.pred, canonical_name
+                        )));
+                    }
                     if value_type == "i1" {
                         let pred_conditions: HashMap<String, Expression> = prior_lowerings
                             .iter()
@@ -1312,6 +1323,31 @@ attributes #1 = { "irreversible" }
     }
 
     #[test]
+    fn loop_carried_phi_surfaces_clear_error() {
+        // A phi whose incoming references the phi's own block is a
+        // loop-carried merge. Out-of-scope per README; the error must
+        // name the shape rather than pointing at "predecessor not
+        // found among processed blocks".
+        let ll = r#"
+%Qubit = type opaque
+
+define void @main() #0 {
+entry:
+  br label %loop
+loop:
+  %count = phi i64 [0, %entry], [%next, %loop]
+  %next = add i64 %count, 1
+  br label %loop
+}
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="0" "requiredResults"="0" }
+"#;
+        let err = translate(ll).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("loop-carried phi"), "{msg}");
+        assert!(msg.contains("loop"), "{msg}");
+    }
+
+    #[test]
     fn select_i32_lowers_to_inline_arithmetic() {
         let ll = r#"
 %Result = type opaque
@@ -1658,15 +1694,68 @@ attributes #0 = { \"entry_point\" \"qir_profiles\"=\"base_profile\" \"requiredQu
     }
 
     #[test]
-    fn custom_profile_name_appears_in_generated_by_line() {
-        let mut custom = crate::profile::base_profile();
-        custom.name = "my_custom_profile".into();
-        let out = translate_minimal(Exporter::new().with_profile(custom));
+    fn input_qir_profile_appears_in_generated_by_line() {
+        // MINIMAL_LL declares `"qir_profiles"="base_profile"`.
+        let out = translate_minimal(Exporter::new());
         let last = last_non_empty_line(&out);
         assert!(
-            last.contains(r#""profile":"my_custom_profile""#),
-            "profile name must be surfaced: {last}"
+            last.contains(r#""profile":"base_profile""#),
+            "input profile must be surfaced: {last}"
         );
+    }
+
+    #[test]
+    fn adaptive_qir_profile_appears_in_generated_by_line() {
+        let ll = "\
+%Qubit = type opaque
+define void @main() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  ret void
+}
+declare void @__quantum__qis__h__body(%Qubit*)
+attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"1\" \"requiredResults\"=\"0\" }
+";
+        let module = parse_module(ll).unwrap();
+        let out = Exporter::new().dumps(&module).unwrap();
+        let last = last_non_empty_line(&out);
+        assert!(
+            last.contains(r#""profile":"adaptive_profile""#),
+            "adaptive input profile must be surfaced: {last}"
+        );
+    }
+
+    #[test]
+    fn omits_profile_field_when_input_declares_none() {
+        // No `qir_profiles` attribute — the field should be omitted.
+        let ll = "\
+%Qubit = type opaque
+define void @main() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  ret void
+}
+declare void @__quantum__qis__h__body(%Qubit*)
+attributes #0 = { \"entry_point\" }
+";
+        let module = parse_module(ll).unwrap();
+        let out = Exporter::new().dumps(&module).unwrap();
+        let last = last_non_empty_line(&out);
+        assert!(
+            !last.contains("\"profile\""),
+            "profile field must be omitted when the input declares none: {last}"
+        );
+    }
+
+    #[test]
+    fn exporter_target_profile_no_longer_leaks_into_generated_by_line() {
+        // Setting a custom target profile on the Exporter must not
+        // change the `"profile"` field, which now tracks the input
+        // QIR profile rather than the exporter's builder registry.
+        let mut custom = crate::profile::base_profile();
+        custom.name = "my_custom_target_profile".into();
+        let out = translate_minimal(Exporter::new().with_profile(custom));
+        let last = last_non_empty_line(&out);
+        assert!(!last.contains("my_custom_target_profile"), "{last}");
+        assert!(last.contains(r#""profile":"base_profile""#), "{last}");
     }
 
     #[test]
