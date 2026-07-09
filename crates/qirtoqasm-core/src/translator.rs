@@ -1078,6 +1078,39 @@ attributes #1 = { \"irreversible\" }
             .to_string()
             .contains("generalizedInvokeWithRotationsControlsTargets"));
     }
+
+    #[test]
+    fn nested_select_i1_true_false_folds_to_bare_predicate() {
+        let ll = "\
+%Qubit = type opaque
+%Result = type opaque
+
+define void @main() #0 {
+  call void @__quantum__qis__h__body(%Qubit* null)
+  call void @__quantum__qis__mz__body(%Qubit* null, %Result* null)
+  %a = call i1 @__quantum__rt__read_result(%Result* null)
+  %b = select i1 %a, i1 true, i1 false
+  %c = select i1 %b, i1 true, i1 false
+  %d = select i1 %c, i1 true, i1 false
+  br i1 %d, label %t, label %f
+t:
+  call void @__quantum__qis__x__body(%Qubit* inttoptr (i64 1 to %Qubit*))
+  br label %f
+f:
+  ret void
+}
+
+declare void @__quantum__qis__h__body(%Qubit*)
+declare void @__quantum__qis__x__body(%Qubit*)
+declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
+declare i1 @__quantum__rt__read_result(%Result*)
+
+attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"2\" \"requiredResults\"=\"1\" }
+attributes #1 = { \"irreversible\" }
+";
+        let out = translate(ll);
+        assert!(out.contains("if (c[0] == 1) {\n  x q[1];\n}"), "{out}");
+    }
 }
 
 #[cfg(test)]
