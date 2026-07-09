@@ -80,6 +80,15 @@ if(WIN32)
     set_target_properties(qirtoqasm_shared PROPERTIES
         IMPORTED_IMPLIB "${QIRTOQASM_CARGO_TARGET_DIR}/${QIRTOQASM_IMPORTLIB_NAME}"
     )
+elseif(UNIX AND NOT APPLE)
+    # On ELF systems, the linker records IMPORTED_LOCATION verbatim as
+    # DT_NEEDED unless IMPORTED_SONAME is set. If the recorded string
+    # contains a slash, the runtime loader treats it as a literal path
+    # and never consults RPATH. Record the bare filename here so that
+    # BUILD_RPATH (below) actually gets consulted at runtime.
+    set_target_properties(qirtoqasm_shared PROPERTIES
+        IMPORTED_SONAME "${QIRTOQASM_SHARED_NAME}"
+    )
 endif()
 
 add_dependencies(qirtoqasm_static qirtoqasm_cargo_build)
@@ -133,11 +142,12 @@ if(QIRTOQASM_BUILD_CPP_TESTS)
                 "$<TARGET_FILE_DIR:qirtoqasm_cpp_smoke>"
         )
     endif()
+    # Keep asserts active in Release builds - these are test executables.
     if(MSVC)
-        target_compile_options(qirtoqasm_cpp_smoke PRIVATE /W4 /WX /permissive-)
+        target_compile_options(qirtoqasm_cpp_smoke PRIVATE /W4 /WX /permissive- /UNDEBUG)
     else()
         target_compile_options(qirtoqasm_cpp_smoke PRIVATE
-            -Wall -Wextra -Werror -Wpedantic)
+            -Wall -Wextra -Werror -Wpedantic -UNDEBUG)
     endif()
 endif()
 
@@ -157,9 +167,9 @@ if(QIRTOQASM_BUILD_C_TESTS)
         )
     endif()
     if(MSVC)
-        target_compile_options(qirtoqasm_c_smoke PRIVATE /W4 /WX)
+        target_compile_options(qirtoqasm_c_smoke PRIVATE /W4 /WX /UNDEBUG)
     else()
         target_compile_options(qirtoqasm_c_smoke PRIVATE
-            -Wall -Wextra -Werror -Wpedantic)
+            -Wall -Wextra -Werror -Wpedantic -UNDEBUG)
     endif()
 endif()
