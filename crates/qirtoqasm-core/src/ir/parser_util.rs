@@ -33,7 +33,11 @@ pub(crate) fn matching_close_paren(s: &str) -> Option<usize> {
 
 /// Split `src` at top-level commas, respecting nested `()`, `[]`, `<>`,
 /// and `{}` brackets. Each returned chunk is whitespace-trimmed.
-pub(crate) fn split_top_level_commas(src: &str) -> Vec<&str> {
+///
+/// Returns an error if a closing bracket appears without a matching
+/// opener — otherwise the depth counter would go negative and later
+/// top-level commas could be missed.
+pub(crate) fn split_top_level_commas(src: &str) -> crate::error::Result<Vec<&str>> {
     let mut out = Vec::new();
     let mut depth = 0i32;
     let bytes = src.as_bytes();
@@ -41,7 +45,14 @@ pub(crate) fn split_top_level_commas(src: &str) -> Vec<&str> {
     for (i, &b) in bytes.iter().enumerate() {
         match b {
             b'{' | b'[' | b'<' | b'(' => depth += 1,
-            b'}' | b']' | b'>' | b')' => depth -= 1,
+            b'}' | b']' | b'>' | b')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return Err(crate::error::QirToQasmError::syntax(format!(
+                        "unbalanced closing bracket in {src:?}"
+                    )));
+                }
+            }
             b',' if depth == 0 => {
                 out.push(src[last..i].trim());
                 last = i + 1;
@@ -50,7 +61,7 @@ pub(crate) fn split_top_level_commas(src: &str) -> Vec<&str> {
         }
     }
     out.push(src[last..].trim());
-    out
+    Ok(out)
 }
 
 /// Parse a leading `@<name>` global reference, with both bare and
@@ -108,29 +119,42 @@ mod tests {
 
     #[test]
     fn split_top_level_commas_respects_every_bracket_kind() {
-        assert_eq!(split_top_level_commas("a, b, c"), vec!["a", "b", "c"]);
         assert_eq!(
-            split_top_level_commas("a, (b, c), d"),
+            split_top_level_commas("a, b, c").unwrap(),
+            vec!["a", "b", "c"]
+        );
+        assert_eq!(
+            split_top_level_commas("a, (b, c), d").unwrap(),
             vec!["a", "(b, c)", "d"]
         );
         assert_eq!(
-            split_top_level_commas("a, [b, c], d"),
+            split_top_level_commas("a, [b, c], d").unwrap(),
             vec!["a", "[b, c]", "d"]
         );
         assert_eq!(
-            split_top_level_commas("a, {b, c}, d"),
+            split_top_level_commas("a, {b, c}, d").unwrap(),
             vec!["a", "{b, c}", "d"]
         );
         assert_eq!(
-            split_top_level_commas("a, <b, c>, d"),
+            split_top_level_commas("a, <b, c>, d").unwrap(),
             vec!["a", "<b, c>", "d"]
         );
     }
 
     #[test]
     fn split_top_level_commas_trims_chunks_and_handles_empty() {
-        assert_eq!(split_top_level_commas(""), vec![""]);
-        assert_eq!(split_top_level_commas("  a  ,  b  "), vec!["a", "b"]);
+        assert_eq!(split_top_level_commas("").unwrap(), vec![""]);
+        assert_eq!(
+            split_top_level_commas("  a  ,  b  ").unwrap(),
+            vec!["a", "b"]
+        );
+    }
+
+    #[test]
+    fn split_top_level_commas_rejects_unbalanced_closing_bracket() {
+        assert!(split_top_level_commas("a}, b").is_err());
+        assert!(split_top_level_commas(")").is_err());
+        assert!(split_top_level_commas("a, b, c]").is_err());
     }
 
     #[test]

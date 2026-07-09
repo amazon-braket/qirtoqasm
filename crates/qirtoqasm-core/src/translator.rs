@@ -147,13 +147,18 @@ impl Exporter {
             statements.push(Statement::Include(inc.clone()));
         }
         if symbols.max_qubit_index >= 0 {
+            let size = symbols.max_qubit_index.checked_add(1).ok_or_else(|| {
+                QirToQasmError::unsupported("qubit index too large to size the qubit register")
+            })? as u64;
             statements.push(Statement::QubitDeclaration {
-                size: (symbols.max_qubit_index + 1) as u64,
+                size,
                 name: QUBIT_REGISTER.into(),
             });
         }
         if symbols.max_result_index >= 0 {
-            let bit_size = (symbols.max_result_index + 1) as u64;
+            let bit_size = symbols.max_result_index.checked_add(1).ok_or_else(|| {
+                QirToQasmError::unsupported("result index too large to size the result register")
+            })? as u64;
             if self.emit_output_declarations {
                 statements.push(Statement::IODeclaration {
                     io_kind: IoKind::Output,

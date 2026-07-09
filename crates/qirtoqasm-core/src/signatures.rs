@@ -253,7 +253,7 @@ fn parse_param_list(src: &str) -> Result<(Vec<String>, bool)> {
     if src.is_empty() {
         return Ok((Vec::new(), false));
     }
-    let mut parts = crate::ir::parser_util::split_top_level_commas(src);
+    let mut parts = crate::ir::parser_util::split_top_level_commas(src)?;
     let mut is_variadic = false;
     if parts.last().map(|s| *s == "...").unwrap_or(false) {
         is_variadic = true;
@@ -324,7 +324,7 @@ fn parse_param_list(src: &str) -> Result<(Vec<String>, bool)> {
     Ok((out, is_variadic))
 }
 
-/// Normalise an LLVM type token to our canonical form.
+/// Normalize an LLVM type token to our canonical form.
 ///
 /// Rules:
 ///   * `%Qubit*` → `"Qubit"`    (typed struct pointer → struct name)
@@ -371,7 +371,7 @@ pub fn canonicalize_type(raw: &str) -> Result<String> {
     }
     // LLVM struct-by-value types, e.g. `{ double*, i64 }` (the
     // list-typed kernel parameter lowering some producers emit). We
-    // never treat these as qubit/result operands; canonicalise to the
+    // never treat these as qubit/result operands; canonicalize to the
     // literal "struct" so the signature stays parseable and downstream
     // dispatch doesn't confuse them with anything else.
     if core.starts_with('{') && core.ends_with('}') {
@@ -403,7 +403,7 @@ fn is_known_primitive(s: &str) -> bool {
 /// false-matches on lookalikes such as `declareSomething` or
 /// `define_foo` that share a prefix with the real `declare` /
 /// `define` keywords but are unrelated identifiers, while still
-/// recognising a bare `declare` / `define` with no trailing content
+/// recognizing a bare `declare` / `define` with no trailing content
 /// as a (malformed) signature line worth surfacing as a parse error
 /// rather than silently skipping.
 fn starts_with_keyword(s: &str, kw: &str) -> bool {
@@ -438,7 +438,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canonicalises_struct_and_primitive_types() {
+    fn canonicalizes_struct_and_primitive_types() {
         assert_eq!(canonicalize_type("%Qubit*").unwrap(), "Qubit");
         assert_eq!(canonicalize_type("%Result*").unwrap(), "Result");
         assert_eq!(canonicalize_type("%\"Qubit\"*").unwrap(), "Qubit");
@@ -675,7 +675,7 @@ mod more_tests_v2 {
         // The first `}` closes the inner struct; without brace-depth
         // tracking the parser would have stopped there and produced a
         // malformed return-type slice. With depth tracking the outer
-        // `}` is found and the return type canonicalises to the
+        // `}` is found and the return type canonicalizes to the
         // struct-by-value sentinel.
         let src = "declare { { i1 }, i64 } @nested()\n";
         let t = extract_signatures(src).unwrap();
@@ -699,7 +699,7 @@ mod more_tests_v2 {
         // qubit/result/classical-scalar dispatch; it does not preserve
         // pointer-vs-value distinctions on primitive types, since
         // those forms never appear in declare/define signatures the
-        // table indexes. Pin the current behaviour so a future
+        // table indexes. Pin the current behavior so a future
         // refactor doesn't silently change it.
         assert_eq!(canonicalize_type("i32").unwrap(), "i32");
         assert_eq!(canonicalize_type("i32*").unwrap(), "i32");
