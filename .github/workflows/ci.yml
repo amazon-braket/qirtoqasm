@@ -155,3 +155,27 @@ jobs:
           else
             ./build/Release/qirtoqasm_c_smoke.exe
           fi
+
+  # CUDA-Q → QIR → qirtoqasm → Braket. Linux + macOS only — no Windows wheels.
+  # Subprocess-isolated per test case: CUDA-Q's MLIR JIT carries process-wide
+  # state that breaks on back-to-back kernel compilations.
+  integ-cudaq:
+    name: Integ / CUDA-Q (${{ matrix.os }} / py ${{ matrix.python-version }})
+    needs: [build, cpp-smoke, c-smoke]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install tox
+        run: pip install tox
+      - name: Run CUDA-Q e2e integ tests
+        run: tox -e integ-cudaq -- -q
