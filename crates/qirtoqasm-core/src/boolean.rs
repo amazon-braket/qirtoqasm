@@ -133,11 +133,13 @@ pub fn lower_int_arith(
 
 /// Lower `select i1 %cond, i1 %a, i1 %b` to a Boolean expression.
 ///
-/// The four short-circuit shapes are recognised and reduced:
+/// Six short-circuit / constant-fold shapes are recognized and reduced:
 ///   * `select %c, %rhs, false`  →  `c && rhs`
 ///   * `select %c, true,  %rhs`  →  `c || rhs`
 ///   * `select %c, false, %rhs`  →  `!c && rhs`
 ///   * `select %c, %rhs, true`   →  `!c || rhs`
+///   * `select %c, true,  false` →  `c`
+///   * `select %c, false, true`  →  `!c`
 ///
 /// All other shapes fall through to the general
 /// `(cond && t) || (!cond && f)` expansion. Non-`i1` value types are
@@ -170,11 +172,13 @@ pub fn lower_select_i1(
     let t_const = constant_i1_value(true_value);
     let f_const = constant_i1_value(false_value);
 
-    // Short-circuit shapes:
+    // Short-circuit / constant-fold shapes:
     //   cond && rhs   ← select %c, %rhs,  false
     //   cond || rhs   ← select %c, true,  %rhs
     //  !cond && rhs   ← select %c, false, %rhs
     //  !cond || rhs   ← select %c, %rhs,  true
+    //   cond          ← select %c, true,  false
+    //  !cond          ← select %c, false, true
     match (t_const, f_const) {
         (None, Some(false)) => {
             let t = resolve_i1_operand(symbols, true_value)?;
@@ -208,8 +212,16 @@ pub fn lower_select_i1(
             );
             return Ok(());
         }
-        // Both branches constant or both non-constant — fall through
-        // to the general expansion.
+        (Some(true), Some(false)) => {
+            symbols.record_ssa(result_key, cond_bool);
+            return Ok(());
+        }
+        (Some(false), Some(true)) => {
+            symbols.record_ssa(result_key, not(cond_bool));
+            return Ok(());
+        }
+        // Both branches constant with matching values, or both non-
+        // constant — fall through to the general expansion.
         _ => {}
     }
 
@@ -1341,5 +1353,60 @@ mod rhs_pair_none_coverage {
         )
         .unwrap();
         assert!(s.lookup_ssa("out").is_ok());
+    }
+
+    #[test]
+    fn select_i1_true_false_folds_to_cond() {
+        // `select i1 %c, i1 true, i1 false` is semantically just `%c`.
+        // Bind the result SSA to the boolean form of `%c`.
+        let mut s = SymbolTable::new();
+        s.record_ssa("cond", index_expr("c", 0));
+        lower_select_i1(
+            "r",
+            "i1",
+            &Operand::Ssa("cond".into()),
+            &Operand::ConstBool(true),
+            &Operand::ConstBool(false),
+            &mut s,
+        )
+        .unwrap();
+        let got = s.lookup_ssa("r").unwrap();
+        assert_eq!(
+            got,
+            Expression::Binary {
+                op: BinaryOp::Eq,
+                lhs: Box::new(index_expr("c", 0)),
+                rhs: Box::new(Expression::Integer(1)),
+            }
+        );
+    }
+
+    #[test]
+    fn select_i1_false_true_folds_to_not_cond() {
+        // `select i1 %c, i1 false, i1 true` is semantically `!%c`.
+        // Bind the result SSA to `!(%c == 1)`.
+        let mut s = SymbolTable::new();
+        s.record_ssa("cond", index_expr("c", 0));
+        lower_select_i1(
+            "r",
+            "i1",
+            &Operand::Ssa("cond".into()),
+            &Operand::ConstBool(false),
+            &Operand::ConstBool(true),
+            &mut s,
+        )
+        .unwrap();
+        let got = s.lookup_ssa("r").unwrap();
+        assert_eq!(
+            got,
+            Expression::Unary {
+                op: UnaryOp::Not,
+                expr: Box::new(Expression::Binary {
+                    op: BinaryOp::Eq,
+                    lhs: Box::new(index_expr("c", 0)),
+                    rhs: Box::new(Expression::Integer(1)),
+                }),
+            }
+        );
     }
 }
