@@ -155,3 +155,25 @@ jobs:
           else
             ./build/Release/qirtoqasm_c_smoke.exe
           fi
+
+  # Q# → QIR → qirtoqasm → Braket, subprocess-isolated per test case.
+  integ-qsharp:
+    name: Integ / Q# (${{ matrix.os }} / py ${{ matrix.python-version }})
+    needs: [build, cpp-smoke, c-smoke]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install tox
+        run: pip install tox
+      - name: Run Q# e2e integ tests
+        run: tox -e integ-qsharp -- -q
