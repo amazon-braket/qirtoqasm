@@ -39,13 +39,29 @@ pub fn lower_cfg(blocks: Vec<BlockLowering>, entry_name: &str) -> Result<Vec<Sta
     if blocks.is_empty() {
         return Ok(Vec::new());
     }
-    let mut map: BTreeMap<String, BlockLowering> =
-        blocks.into_iter().map(|b| (b.name.clone(), b)).collect();
+    let mut map: BTreeMap<String, BlockLowering> = BTreeMap::new();
+    for b in blocks {
+        let name = b.name.clone();
+        if map.insert(name.clone(), b).is_some() {
+            return Err(QirToQasmError::unsupported(format!(
+                "duplicate block label `%{name}`"
+            )));
+        }
+    }
     if !map.contains_key(entry_name) {
         return Err(QirToQasmError::unsupported_cfg(format!(
             "entry block {:?} not found among block lowerings",
             entry_name
         )));
+    }
+    for b in map.values() {
+        for t in &b.targets {
+            if !map.contains_key(t) {
+                return Err(QirToQasmError::unsupported(format!(
+                    "branch target `%{t}` does not match any block in this function"
+                )));
+            }
+        }
     }
     let mut cfg = Cfg::new();
     for name in map.keys() {

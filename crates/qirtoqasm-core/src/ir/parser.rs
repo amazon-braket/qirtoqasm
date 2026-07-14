@@ -669,7 +669,7 @@ fn parse_operand_list(src: &str) -> Result<Vec<Operand>> {
     if src.trim().is_empty() {
         return Ok(vec![]);
     }
-    let parts = super::parser_util::split_top_level_commas(src);
+    let parts = super::parser_util::split_top_level_commas(src)?;
     let mut out = Vec::with_capacity(parts.len());
     for p in parts {
         out.push(parse_operand(p.trim())?);
@@ -909,7 +909,7 @@ fn parse_br(args: &str) -> Result<Instruction> {
         });
     }
     if let Some(rest) = s.strip_prefix("i1 ") {
-        let mut pieces = super::parser_util::split_top_level_commas(rest);
+        let mut pieces = super::parser_util::split_top_level_commas(rest)?;
         if pieces.len() != 3 {
             return Err(QirToQasmError::syntax(format!(
                 "br i1 expects cond, true_label, false_label: {args:?}"
@@ -984,7 +984,7 @@ fn parse_icmp(result: Option<String>, args: &str) -> Result<Instruction> {
     let rest = after_token(s);
     let ty = first_token(rest);
     let rest = after_token(rest);
-    let pieces = super::parser_util::split_top_level_commas(rest);
+    let pieces = super::parser_util::split_top_level_commas(rest)?;
     if pieces.len() != 2 {
         return Err(QirToQasmError::syntax(format!(
             "icmp expects two operands: {args:?}"
@@ -1018,7 +1018,7 @@ fn parse_binary_i1(
         )));
     }
     let rest = after_token(s);
-    let pieces = super::parser_util::split_top_level_commas(rest);
+    let pieces = super::parser_util::split_top_level_commas(rest)?;
     if pieces.len() != 2 {
         return Err(QirToQasmError::syntax(format!(
             "{opcode} expects two operands: {args:?}"
@@ -1056,7 +1056,7 @@ fn parse_int_arith(
     }
     let ty = first_token(s);
     let rest = after_token(s);
-    let pieces = super::parser_util::split_top_level_commas(rest);
+    let pieces = super::parser_util::split_top_level_commas(rest)?;
     if pieces.len() != 2 {
         return Err(QirToQasmError::syntax(format!(
             "{opcode} expects two operands: {args:?}"
@@ -1086,7 +1086,7 @@ fn parse_select(result: Option<String>, args: &str) -> Result<Instruction> {
         )));
     }
     let rest = after_token(s);
-    let pieces = super::parser_util::split_top_level_commas(rest);
+    let pieces = super::parser_util::split_top_level_commas(rest)?;
     if pieces.len() != 3 {
         return Err(QirToQasmError::syntax(format!(
             "select expects three comma-separated operands (cond, then, else): {args:?}"
@@ -1144,7 +1144,7 @@ fn parse_phi(result: Option<String>, args: &str) -> Result<Instruction> {
             .map(|o| i + o)
             .ok_or_else(|| QirToQasmError::syntax("phi incoming missing ]"))?;
         let inner = &rest[i + 1..close];
-        let pieces = super::parser_util::split_top_level_commas(inner);
+        let pieces = super::parser_util::split_top_level_commas(inner)?;
         if pieces.len() != 2 {
             return Err(QirToQasmError::syntax(format!(
                 "phi incoming must have value and predecessor: [{inner}]"
@@ -1258,7 +1258,7 @@ fn parse_getelementptr(result: Option<String>, args: &str) -> Option<Instruction
         .strip_prefix("inbounds")
         .map(str::trim_start)
         .unwrap_or(rest);
-    let pieces = super::parser_util::split_top_level_commas(rest);
+    let pieces = super::parser_util::split_top_level_commas(rest).ok()?;
     if pieces.len() != 4 {
         return None;
     }
@@ -1287,7 +1287,7 @@ fn parse_getelementptr(result: Option<String>, args: &str) -> Option<Instruction
 fn parse_load(result: Option<String>, args: &str) -> Option<Instruction> {
     let result = result?;
     let rest = strip_trailing_comment(args).trim();
-    let pieces = super::parser_util::split_top_level_commas(rest);
+    let pieces = super::parser_util::split_top_level_commas(rest).ok()?;
     if pieces.len() < 2 {
         return None;
     }
@@ -1298,7 +1298,7 @@ fn parse_load(result: Option<String>, args: &str) -> Option<Instruction> {
 /// Parse `store <ty> <value>, <ty>* %ptr[, align N]`.
 fn parse_store(args: &str) -> Option<Instruction> {
     let rest = strip_trailing_comment(args).trim();
-    let pieces = super::parser_util::split_top_level_commas(rest);
+    let pieces = super::parser_util::split_top_level_commas(rest).ok()?;
     if pieces.len() < 2 {
         return None;
     }
@@ -2170,7 +2170,7 @@ attributes #0 = { \"entry_point\" }
     }
 
     #[test]
-    fn quoted_struct_typed_pointer_canonicalises_to_name() {
+    fn quoted_struct_typed_pointer_canonicalizes_to_name() {
         let ty = parse_struct_ptr_type("%\"MyStruct\"*");
         assert_eq!(ty, Some("MyStruct".to_string()));
     }
