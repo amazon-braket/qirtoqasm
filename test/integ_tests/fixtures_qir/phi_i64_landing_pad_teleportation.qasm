@@ -13,4 +13,3 @@ if (c[1] == 1) {
 if (c[0] == 1) {
   z q[2];
 }
-// generated-by: {"name":"qirtoqasm","version":"0.1.0-dev0","profile":"adaptive_profile"}

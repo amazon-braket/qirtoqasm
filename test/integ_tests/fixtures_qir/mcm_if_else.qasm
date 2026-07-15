@@ -9,4 +9,3 @@ if (c[0]) {
   z q[1];
 }
 c[1] = measure q[1];
-// generated-by: {"name":"qirtoqasm","version":"0.1.0-dev0","profile":"adaptive_profile"}

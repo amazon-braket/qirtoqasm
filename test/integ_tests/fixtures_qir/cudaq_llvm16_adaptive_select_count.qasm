@@ -11,4 +11,3 @@ if (c[1] * (c[0] * 2 + (1 - c[0]) * 1) + (1 - c[1]) * c[0] + c[2] > 1) {
   x q[3];
 }
 c[3] = measure q[3];
-// generated-by: {"name":"qirtoqasm","version":"0.1.0-dev0","profile":"adaptive_profile"}

@@ -16,4 +16,3 @@ prx(1.5707963267948966, 3.141592653589793) q[2];
 rz(-1.5707963267948966) q[2];
 c[1] = measure q[1];
 c[2] = measure q[2];
-// generated-by: {"name":"qirtoqasm","version":"0.1.0-dev0","profile":"custom"}

@@ -122,4 +122,3 @@ c[3] = measure q[0];
 if (c[3]) {
   x q[5];
 }
-// generated-by: {"name":"qirtoqasm","version":"0.1.0-dev0","profile":"adaptive_profile"}

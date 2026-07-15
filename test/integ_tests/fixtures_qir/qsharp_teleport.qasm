@@ -16,4 +16,3 @@ if (c[0]) {
 }
 h q[2];
 c[2] = measure q[2];
-// generated-by: {"name":"qirtoqasm","version":"0.1.0-dev0","profile":"adaptive_profile"}

@@ -26,4 +26,3 @@ if (cint_0 >= 2) {
   x q[4];
 }
 c[4] = measure q[4];
-// generated-by: {"name":"qirtoqasm","version":"0.1.0-dev0","profile":"adaptive_profile"}

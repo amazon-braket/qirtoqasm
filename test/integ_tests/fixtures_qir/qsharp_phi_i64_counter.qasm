@@ -17,4 +17,3 @@ if (c[1]) {
 if (c[2]) {
   cint_0 = cint_0 + 1;
 }
-// generated-by: {"name":"qirtoqasm","version":"0.1.0-dev0","profile":"adaptive_profile"}
