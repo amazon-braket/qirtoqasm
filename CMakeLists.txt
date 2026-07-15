@@ -25,25 +25,42 @@ set(CARGO_PROFILE_FLAG --release)
 set(CARGO_PROFILE release)
 
 if(APPLE)
-    set(QIRTOQASM_SHARED_SUFFIX ".dylib")
-elseif(UNIX)
-    set(QIRTOQASM_SHARED_SUFFIX ".so")
+    set(QIRTOQASM_STATIC_NAME "libqirtoqasm.a")
+    set(QIRTOQASM_SHARED_NAME "libqirtoqasm.dylib")
 elseif(WIN32)
-    set(QIRTOQASM_SHARED_SUFFIX ".dll")
+    # Cargo names cdylibs `<crate>.dll` (no `lib` prefix) with an
+    # accompanying `<crate>.dll.lib` import library on MSVC; the
+    # staticlib output is `<crate>.lib`.
+    set(QIRTOQASM_STATIC_NAME "qirtoqasm.lib")
+    set(QIRTOQASM_SHARED_NAME "qirtoqasm.dll")
+    set(QIRTOQASM_IMPORTLIB_NAME "qirtoqasm.dll.lib")
 else()
-    set(QIRTOQASM_SHARED_SUFFIX ".so")
+    set(QIRTOQASM_STATIC_NAME "libqirtoqasm.a")
+    set(QIRTOQASM_SHARED_NAME "libqirtoqasm.so")
 endif()
 
-set(QIRTOQASM_STATIC_NAME "libqirtoqasm.a")
-set(QIRTOQASM_SHARED_NAME "libqirtoqasm${QIRTOQASM_SHARED_SUFFIX}")
-
 set(QIRTOQASM_CARGO_TARGET_DIR "${CARGO_BUILD_DIR}/${CARGO_PROFILE}")
+
+# On Linux, ask rustc to embed a SONAME in the cdylib so consumers'
+# DT_NEEDED records a bare filename instead of the .so path. Without
+# this the recorded path contains slashes, which per ld.so bypasses
+# RPATH search at runtime.
+if(UNIX AND NOT APPLE)
+    set(QIRTOQASM_CARGO_ENV
+        CARGO_TARGET_DIR=${CARGO_BUILD_DIR}
+        RUSTFLAGS=-Clink-arg=-Wl,-soname,libqirtoqasm.so
+    )
+else()
+    set(QIRTOQASM_CARGO_ENV
+        CARGO_TARGET_DIR=${CARGO_BUILD_DIR}
+    )
+endif()
 
 add_custom_command(
     OUTPUT
         "${QIRTOQASM_CARGO_TARGET_DIR}/${QIRTOQASM_STATIC_NAME}"
         "${QIRTOQASM_CARGO_TARGET_DIR}/${QIRTOQASM_SHARED_NAME}"
-    COMMAND ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_BUILD_DIR}
+    COMMAND ${CMAKE_COMMAND} -E env ${QIRTOQASM_CARGO_ENV}
         cargo build ${CARGO_PROFILE_FLAG} -p qirtoqasm-ffi
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Building qirtoqasm-ffi (cargo ${CARGO_PROFILE})"
@@ -72,6 +89,13 @@ set_target_properties(qirtoqasm_shared PROPERTIES
     IMPORTED_LOCATION "${QIRTOQASM_CARGO_TARGET_DIR}/${QIRTOQASM_SHARED_NAME}"
     INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/include"
 )
+if(WIN32)
+    # A SHARED IMPORTED target on Windows requires an import library
+    # alongside the DLL — CMake enforces this at generate time.
+    set_target_properties(qirtoqasm_shared PROPERTIES
+        IMPORTED_IMPLIB "${QIRTOQASM_CARGO_TARGET_DIR}/${QIRTOQASM_IMPORTLIB_NAME}"
+    )
+endif()
 
 add_dependencies(qirtoqasm_static qirtoqasm_cargo_build)
 add_dependencies(qirtoqasm_shared qirtoqasm_cargo_build)
@@ -110,11 +134,26 @@ if(QIRTOQASM_BUILD_CPP_TESTS)
     add_executable(qirtoqasm_cpp_smoke cmake/cpp_smoke.cpp)
     target_link_libraries(qirtoqasm_cpp_smoke PRIVATE qirtoqasm::qirtoqasm)
     target_compile_features(qirtoqasm_cpp_smoke PRIVATE cxx_std_20)
+    # Runtime search: on ELF/Mach-O, embed BUILD_RPATH so the loader
+    # finds libqirtoqasm at the cargo output directory. On Windows,
+    # copy qirtoqasm.dll next to the executable post-build (the
+    # Windows loader searches the executable's own directory).
+    set_target_properties(qirtoqasm_cpp_smoke PROPERTIES
+        BUILD_RPATH "${QIRTOQASM_CARGO_TARGET_DIR}"
+    )
+    if(WIN32)
+        add_custom_command(TARGET qirtoqasm_cpp_smoke POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${QIRTOQASM_CARGO_TARGET_DIR}/${QIRTOQASM_SHARED_NAME}"
+                "$<TARGET_FILE_DIR:qirtoqasm_cpp_smoke>"
+        )
+    endif()
+    # Keep asserts active in Release builds - these are test executables.
     if(MSVC)
-        target_compile_options(qirtoqasm_cpp_smoke PRIVATE /W4 /WX /permissive-)
+        target_compile_options(qirtoqasm_cpp_smoke PRIVATE /W4 /WX /permissive- /UNDEBUG)
     else()
         target_compile_options(qirtoqasm_cpp_smoke PRIVATE
-            -Wall -Wextra -Werror -Wpedantic)
+            -Wall -Wextra -Werror -Wpedantic -UNDEBUG)
     endif()
 endif()
 
@@ -124,11 +163,19 @@ if(QIRTOQASM_BUILD_C_TESTS)
     set_target_properties(qirtoqasm_c_smoke PROPERTIES
         C_STANDARD 11
         C_STANDARD_REQUIRED ON
-        C_EXTENSIONS OFF)
+        C_EXTENSIONS OFF
+        BUILD_RPATH "${QIRTOQASM_CARGO_TARGET_DIR}")
+    if(WIN32)
+        add_custom_command(TARGET qirtoqasm_c_smoke POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${QIRTOQASM_CARGO_TARGET_DIR}/${QIRTOQASM_SHARED_NAME}"
+                "$<TARGET_FILE_DIR:qirtoqasm_c_smoke>"
+        )
+    endif()
     if(MSVC)
-        target_compile_options(qirtoqasm_c_smoke PRIVATE /W4 /WX)
+        target_compile_options(qirtoqasm_c_smoke PRIVATE /W4 /WX /UNDEBUG)
     else()
         target_compile_options(qirtoqasm_c_smoke PRIVATE
-            -Wall -Wextra -Werror -Wpedantic)
+            -Wall -Wextra -Werror -Wpedantic -UNDEBUG)
     endif()
 endif()

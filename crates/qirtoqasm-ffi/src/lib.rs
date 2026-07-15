@@ -180,13 +180,17 @@ pub extern "C" fn qirtoqasm_version() -> *mut c_char {
 }
 
 /// Consume an optional NUL-terminated UTF-8 pointer. Empty → `None`.
-unsafe fn read_optional_cstr(ptr: *const c_char) -> Result<Option<&'static str>, String> {
+///
+/// Returns an owned `String` rather than borrowing from the caller-
+/// provided C memory — the caller retains ownership of the buffer
+/// and its lifetime is not visible to Rust.
+unsafe fn read_optional_cstr(ptr: *const c_char) -> Result<Option<String>, String> {
     if ptr.is_null() {
         return Ok(None);
     }
     match CStr::from_ptr(ptr).to_str() {
         Ok("") => Ok(None),
-        Ok(s) => Ok(Some(s)),
+        Ok(s) => Ok(Some(s.to_string())),
         Err(_) => Err("options field is not valid UTF-8".to_string()),
     }
 }
@@ -225,9 +229,9 @@ unsafe fn build_options(
 
 fn rust_string_to_c(s: &str) -> *mut c_char {
     // Replace interior NULs with '?', which CString would otherwise refuse.
-    let sanitised: String = s.chars().map(|c| if c == '\0' { '?' } else { c }).collect();
-    CString::new(sanitised)
-        .expect("no interior NUL after sanitisation")
+    let sanitized: String = s.chars().map(|c| if c == '\0' { '?' } else { c }).collect();
+    CString::new(sanitized)
+        .expect("no interior NUL after sanitization")
         .into_raw()
 }
 
