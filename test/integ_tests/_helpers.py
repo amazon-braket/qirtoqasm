@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from scipy.stats import chi2_contingency
+
 SHOTS = 2000
 TOLERANCE = 0.10
 CHI2_SIGNIFICANCE = 0.001
@@ -30,8 +32,6 @@ def assert_distributions_equivalent(
     significance: float = CHI2_SIGNIFICANCE,
 ) -> None:
     """Two-sample chi-squared test; fails only if p < significance."""
-    from scipy.stats import chi2_contingency
-
     all_outcomes = sorted(set(counts_a) | set(counts_b))
     filtered = [(counts_a.get(k, 0), counts_b.get(k, 0)) for k in all_outcomes]
     filtered = [(a, b) for a, b in filtered if a + b > 0]
