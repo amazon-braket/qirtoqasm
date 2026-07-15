@@ -1,4 +1,4 @@
-//! Byte-exact golden-fixture integration tests.
+//! Byte-exact fixture-parity integration tests.
 //!
 //! For every `.ll` file in `test/integ_tests/fixtures_qir/` that has a sibling
 //! `.qasm` file, parse the QIR, translate it, and assert the output equals
@@ -90,7 +90,7 @@ fn every_positive_fixture_translates_byte_for_byte() {
             ));
         }
         panic!(
-            "golden fixture parity failures ({} errors, {} mismatches):{}",
+            "fixture parity failures ({} errors, {} mismatches):{}",
             errors.len(),
             mismatches.len(),
             msg

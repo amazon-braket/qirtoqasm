@@ -11,10 +11,10 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 
-"""Golden tests: byte-exact translation and cross-simulator correctness.
+"""Fixture-parity tests: byte-exact translation and cross-simulator correctness.
 
-``test_golden`` — each .ll/.qasm pair is compared byte-exact.
-``test_golden_simulation`` — qirrunner vs Braket chi-squared comparison.
+``test_translates_fixture_byte_for_byte`` — each .ll/.qasm pair is compared byte-exact.
+``test_qirrunner_and_braket_agree_on_distribution`` — qirrunner vs Braket chi-squared comparison.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from _helpers import SHOTS, assert_distributions_equivalent
 FIXTURES = Path(__file__).parent / "fixtures_qir"
 QIRRUNNER = Path(__file__).parent / "_qirrunner_runner.py"
 
-_GOLDEN_NAMES = sorted(
+_FIXTURE_NAMES = sorted(
     p.stem for p in FIXTURES.glob("*.ll") if (FIXTURES / f"{p.stem}.qasm").exists()
 )
 
@@ -88,8 +88,8 @@ def _strip_generated_by(s: str) -> str:
     return "\n".join(line for line in s.splitlines() if not line.startswith("// generated-by:"))
 
 
-@pytest.mark.parametrize("name", _GOLDEN_NAMES)
-def test_golden(name: str) -> None:
+@pytest.mark.parametrize("name", _FIXTURE_NAMES)
+def test_translates_fixture_byte_for_byte(name: str) -> None:
     ir_path = FIXTURES / f"{name}.ll"
     expected_path = FIXTURES / f"{name}.qasm"
     actual = _strip_generated_by(qirtoqasm.translate(ir_path.read_text())).rstrip()
@@ -137,7 +137,7 @@ def _run_braket(ll_path: Path, shots: int) -> dict[str, int]:
 
 @pytest.mark.integ
 @pytest.mark.parametrize("name", _SIMULATABLE_NAMES)
-def test_golden_simulation(name: str) -> None:
+def test_qirrunner_and_braket_agree_on_distribution(name: str) -> None:
     ll_path = FIXTURES / f"{name}.ll"
     qir_counts = _run_qirrunner(ll_path, SHOTS)
     braket_counts = _run_braket(ll_path, SHOTS)

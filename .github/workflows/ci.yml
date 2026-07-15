@@ -4,7 +4,7 @@
 #             CUDA-Q. 3 OS × 3 Py.
 # msrv      — rust 1.75 build + test on Ubuntu.
 #
-# integ-* (braket / qsharp / cudaq / golden) and the C/C++ smoke jobs
+# integ-* (braket / qsharp / cudaq / fixture-parity) and the C/C++ smoke jobs
 # land alongside the code they exercise.
 
 name: CI
@@ -156,9 +156,9 @@ jobs:
             ./build/Release/qirtoqasm_c_smoke.exe
           fi
 
-  # Golden fixture regression + cross-simulator correctness.
-  integ-golden:
-    name: Integ / Golden (${{ matrix.os }} / py ${{ matrix.python-version }})
+  # Byte-exact fixture regression + cross-simulator correctness.
+  integ-fixture-parity:
+    name: Integ / Fixture parity (${{ matrix.os }} / py ${{ matrix.python-version }})
     needs: [build, cpp-smoke, c-smoke]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -175,5 +175,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install tox
         run: pip install tox
-      - name: Run golden integ tests
-        run: tox -e integ-golden -- -q
+      - name: Run fixture-parity integ tests
+        run: tox -e integ-fixture-parity -- -q

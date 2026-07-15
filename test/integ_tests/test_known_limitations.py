@@ -16,7 +16,7 @@ but must produce a *clear, user-actionable* error.
 
 If a future change makes one of these cases succeed (by implementing
 the missing support), the test will fail and the author should move
-the fixture into the normal golden suite and add an expected ``.qasm``
+the fixture into the fixture-parity suite and add an expected ``.qasm``
 pair.
 
 Today the only known limitation is the variadic
@@ -24,8 +24,8 @@ Today the only known limitation is the variadic
 multi-controlled gates that don't have a Braket-native counterpart
 (controlled-H, CCZ with two Z-controls, 3-control X, …). The mapped
 tuples (``x.ctrl`` 1-2 ctrls, ``y.ctrl``, ``z.ctrl``, ``swap.ctrl``,
-``phaseshift.ctrl``) translate successfully and live in the golden
-suite.
+``phaseshift.ctrl``) translate successfully and live in the
+fixture-parity suite.
 """
 
 from __future__ import annotations
@@ -77,5 +77,5 @@ def test_unmapped_controlled_gate_error_names_decomposition_workaround() -> None
         pytest.fail(
             "cudaq_unsupported_ctrl_h fixture unexpectedly succeeded. If "
             "controlled-H is now supported, move the fixture to a "
-            ".qasm-paired golden test."
+            ".qasm-paired fixture-parity test."
         )
