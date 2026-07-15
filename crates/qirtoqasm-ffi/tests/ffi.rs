@@ -196,6 +196,57 @@ fn reports_error_when_qir_pointer_is_null() {
     unsafe { qirtoqasm::qirtoqasm_free_string(err) };
 }
 
+#[test]
+fn reports_error_when_producer_is_not_valid_utf8() {
+    let c_qir = CString::new(BELL_LL).unwrap();
+    // Interior bytes 0xff, 0xfe are not valid UTF-8; final 0x00 terminates.
+    let bad_producer: &[u8] = b"\xff\xfe\0";
+
+    let mut opts_uninit = MaybeUninit::<qirtoqasm_options_t>::uninit();
+    unsafe { qirtoqasm::qirtoqasm_options_init(opts_uninit.as_mut_ptr()) };
+    let mut opts = unsafe { opts_uninit.assume_init() };
+    opts.producer = bad_producer.as_ptr() as *const std::os::raw::c_char;
+
+    let mut out: *mut std::os::raw::c_char = ptr::null_mut();
+    let mut err: *mut std::os::raw::c_char = ptr::null_mut();
+    let rc = unsafe { qirtoqasm::qirtoqasm_translate(c_qir.as_ptr(), &opts, &mut out, &mut err) };
+    assert_ne!(rc, QIRTOQASM_OK);
+    assert!(out.is_null());
+    let msg = unsafe { CStr::from_ptr(err) }.to_str().unwrap().to_string();
+    assert!(msg.contains("not valid UTF-8"), "{msg}");
+    unsafe { qirtoqasm::qirtoqasm_free_string(err) };
+}
+
+#[test]
+fn accepts_larger_struct_size_from_forward_compatible_caller() {
+    // ABI-versioning promise: a future caller that ships a longer
+    // qirtoqasm_options_t layout must still translate successfully
+    // against a today-built library, so long as the tail past the
+    // V1 fields is zero-initialized.
+    let v1_size = std::mem::size_of::<qirtoqasm_options_t>();
+    let padded_size = v1_size + 32;
+    let mut buffer = vec![0u8; padded_size];
+    unsafe {
+        qirtoqasm::qirtoqasm_options_init(buffer.as_mut_ptr() as *mut qirtoqasm_options_t);
+        let opts = &mut *(buffer.as_mut_ptr() as *mut qirtoqasm_options_t);
+        opts.struct_size = padded_size as u32;
+    }
+
+    let c_qir = CString::new(BELL_LL).unwrap();
+    let mut out: *mut std::os::raw::c_char = ptr::null_mut();
+    let mut err: *mut std::os::raw::c_char = ptr::null_mut();
+    let rc = unsafe {
+        qirtoqasm::qirtoqasm_translate(
+            c_qir.as_ptr(),
+            buffer.as_ptr() as *const qirtoqasm_options_t,
+            &mut out,
+            &mut err,
+        )
+    };
+    let result = collect(rc, out, err).unwrap();
+    assert_eq!(strip_generated_by(&result), strip_generated_by(BELL_QASM));
+}
+
 // ---------------------------------------------------------------------------
 // Housekeeping endpoints
 // ---------------------------------------------------------------------------
