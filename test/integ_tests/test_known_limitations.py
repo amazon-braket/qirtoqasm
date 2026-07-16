@@ -63,16 +63,16 @@ def test_known_limitation_produces_actionable_error(
 
 
 def test_unmapped_controlled_gate_error_names_decomposition_workaround() -> None:
-    """Users hitting the controlled-H variadic path need two signals
-    from the error message: what's failing (a multi-controlled gate)
-    and why (the variadic lowering intrinsic).
-    """
+    """The error for an unmapped multi-controlled gate must direct the
+    user to the workaround (upstream decomposition) and name the
+    variadic intrinsic driving the dispatch."""
     ir_text = (FIXTURES / "cudaq_unsupported_ctrl_h.ll").read_text()
     try:
         qirtoqasm.translate(ir_text)
     except QirToQasmError as e:
         message = str(e)
-        assert "generalizedInvoke" in message, message
+        assert "decomposition" in message, message
+        assert "generalizedInvokeWithRotationsControlsTargets" in message, message
     else:  # pragma: no cover
         pytest.fail(
             "cudaq_unsupported_ctrl_h fixture unexpectedly succeeded. If "

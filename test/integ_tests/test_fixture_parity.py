@@ -30,6 +30,10 @@ import pytest
 import qirtoqasm
 from _helpers import SHOTS, assert_distributions_equivalent
 
+pytest.importorskip("qirrunner")
+braket_devices = pytest.importorskip("braket.devices")
+braket_ir = pytest.importorskip("braket.ir.openqasm")
+
 FIXTURES = Path(__file__).parent / "fixtures_qir"
 QIRRUNNER = Path(__file__).parent / "_qirrunner_runner.py"
 
@@ -97,11 +101,6 @@ def test_translates_fixture_byte_for_byte(name: str) -> None:
     assert actual == expected, (
         f"\n--- Expected ({expected_path.name}) ---\n{expected}\n--- Actual ---\n{actual}\n"
     )
-
-
-pytest.importorskip("qirrunner")
-braket_devices = pytest.importorskip("braket.devices")
-braket_ir = pytest.importorskip("braket.ir.openqasm")
 
 
 def _run_qirrunner(ll_path: Path, shots: int) -> dict[str, int]:
