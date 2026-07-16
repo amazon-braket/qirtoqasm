@@ -26,13 +26,6 @@ from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
 
 
-def load_fixture(fixture_path: str):
-    spec = importlib.util.spec_from_file_location("fixture", fixture_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
 _SAMPLE_UNSUPPORTED = (
     "conditional feedback",
     "branch on measurement",
@@ -40,6 +33,13 @@ _SAMPLE_UNSUPPORTED = (
     "return None",
 )
 _RUN_UNSUPPORTED = ("must return a value", "non-void return")
+
+
+def load_fixture(fixture_path: str):
+    spec = importlib.util.spec_from_file_location("fixture", fixture_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def native_sim(mod, kernel_args: tuple, shots: int) -> dict | None:

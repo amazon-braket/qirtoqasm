@@ -91,6 +91,7 @@ def test_cudaq_feedforward_mcm() -> None:
     """Void-return MCM kernel — no native cross-sim (cudaq.sample and
     cudaq.run both reject this shape)."""
     result = _run("feedforward.py")
+    assert "native_counts" not in result, result
 
     counts = result["counts"]
     total = sum(counts.values())
@@ -120,14 +121,9 @@ def test_cudaq_bernstein_vazirani() -> None:
     assert "cnot" in result["openqasm"]
     for bits, n in result["counts"].items():
         if n > 0:
-            assert bits[:3] == "101", (bits, "BV must recover the hidden string")
+            assert bits == "101", (bits, "BV must recover the hidden string")
 
-    # Native counts are 3-bit (only data qubits measured).
-    native = result["native_counts"]
-    braket_trimmed: dict[str, int] = {}
-    for bits, n in result["counts"].items():
-        braket_trimmed[bits[:3]] = braket_trimmed.get(bits[:3], 0) + n
-    assert_distributions_equivalent(native, braket_trimmed)
+    assert_distributions_equivalent(result["native_counts"], result["counts"])
 
 
 def test_cudaq_list_float_parameter() -> None:
