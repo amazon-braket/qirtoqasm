@@ -84,6 +84,7 @@ def test_qsharp_ghz5() -> None:
 
 def test_qsharp_feedforward_mcm() -> None:
     result = _run("feedforward.qs", "Feedforward()", "Adaptive_RI")
+    assert "if (c[0]" in result["openqasm"], result["openqasm"]
 
     counts = result["counts"]
     total = sum(counts.values())
