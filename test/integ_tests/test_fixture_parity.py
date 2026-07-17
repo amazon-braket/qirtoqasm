@@ -43,27 +43,33 @@ _FIXTURE_NAMES = sorted(
 
 
 # Fixtures excluded from cross-simulator correctness testing.
-# Each entry documents why qirrunner cannot execute it.
+# Each entry documents why qirrunner cannot execute the fixture.
 _QIRRUNNER_UNSUPPORTED: dict[str, str] = {
-    # Unsupported QIS intrinsics (generalizedInvoke, phasedx, swap_ctl)
-    "cudaq_cswap": "generalizedInvokeWithRotationsControlsTargets + swap_ctl",
-    "cudaq_cy_via_ctrl": "generalizedInvokeWithRotationsControlsTargets",
-    "cudaq_toffoli": "generalizedInvokeWithRotationsControlsTargets",
-    "cudaq_llvm16_cswap": "generalizedInvokeWithRotationsControlsTargets",
-    "cudaq_llvm16_cy_via_ctrl": "generalizedInvokeWithRotationsControlsTargets",
-    "cudaq_llvm16_toffoli": "generalizedInvokeWithRotationsControlsTargets",
-    "phasedx_decomposed_toffoli": "__quantum__qis__phasedx__body",
-    "phasedx_discard_measurements": "__quantum__qis__phasedx__body",
-    "phasedx_gates_zoo": "__quantum__qis__phasedx__body",
-    "phasedx_ghz3": "__quantum__qis__phasedx__body",
-    # Parametrized entry points (qirrunner rejects non-void, non-nullary entries)
-    "cudaq_list_param": "entry point has parameters",
-    "cudaq_param_kernel": "entry point has parameters",
-    # Return-value infrastructure uses malloc (qirrunner can't link it)
-    "cudaq_feedforward_with_return": "malloc linkage",
-    # Non-RESULT record_output (integer outputs, no measurement data)
-    "qsharp_int_record_output": "integer_record_output only",
-    "qsharp_phi_i64_counter": "integer_record_output only",
+    # Multi-controlled gates dispatched through the generalizedInvoke... variadic intrinsic.
+    "cudaq_cswap": "qirrunner has no implementation for controlled-swap via the generalizedInvoke... intrinsic",
+    "cudaq_cy_via_ctrl": "qirrunner has no implementation for controlled-Y via the generalizedInvoke... intrinsic",
+    "cudaq_toffoli": "qirrunner has no implementation for the Toffoli (CCX) via the generalizedInvoke... intrinsic",
+    "cudaq_llvm16_cswap": "qirrunner has no implementation for controlled-swap via the generalizedInvoke... intrinsic (LLVM 15+ opaque-pointer variant)",
+    "cudaq_llvm16_cy_via_ctrl": "qirrunner has no implementation for controlled-Y via the generalizedInvoke... intrinsic (LLVM 15+ opaque-pointer variant)",
+    "cudaq_llvm16_toffoli": "qirrunner has no implementation for the Toffoli (CCX) via the generalizedInvoke... intrinsic (LLVM 15+ opaque-pointer variant)",
+    # phasedx rotation gate: not in qirrunner's intrinsic table.
+    "phasedx_decomposed_toffoli": "qirrunner has no implementation for the __quantum__qis__phasedx__body gate",
+    "phasedx_discard_measurements": "qirrunner has no implementation for the __quantum__qis__phasedx__body gate",
+    "phasedx_gates_zoo": "qirrunner has no implementation for the __quantum__qis__phasedx__body gate",
+    "phasedx_ghz3": "qirrunner has no implementation for the __quantum__qis__phasedx__body gate",
+    # Parametrized entry points: qirrunner requires a nullary void-returning main.
+    "cudaq_list_param": "qirrunner rejects non-nullary entry points (fixture takes a runtime parameter)",
+    "cudaq_param_kernel": "qirrunner rejects non-nullary entry points (fixture takes a runtime parameter)",
+    # Return-value infrastructure allocates via malloc, which qirrunner does not link in.
+    "cudaq_feedforward_with_return": "qirrunner cannot link the malloc-based return-value infrastructure",
+    # These fixtures emit only integer_record_output with no result_record_output calls,
+    # so qirrunner reports no measurement data to compare against Braket.
+    "qsharp_int_record_output": "qirrunner has no measurement data to report — fixture emits only integer_record_output, not result_record_output",
+    "qsharp_phi_i64_counter": "qirrunner has no measurement data to report — fixture emits only integer_record_output, not result_record_output",
+    # Teleportation records a non-contiguous subset of qubits, so qirrunner's declared-outputs
+    # bitstring cannot be aligned to Braket's all-qubits report for chi-squared comparison.
+    "teleportation": "teleportation records a non-contiguous subset of qubits; qirrunner's declared-outputs bitstring cannot be aligned to Braket's all-qubits report",
+    "phi_i64_landing_pad_teleportation": "teleportation records a non-contiguous subset of qubits; qirrunner's declared-outputs bitstring cannot be aligned to Braket's all-qubits report",
 }
 
 
@@ -75,10 +81,7 @@ def _is_simulatable(ll_path: Path) -> bool:
         return False
     # Adaptive profile + reset: qirrunner reports pre-reset measurements,
     # Braket reports post-reset qubit state (semantic mismatch).
-    if "adaptive_profile" in text and "reset__body" in text:
-        return False
-    # Teleportation records a non-contiguous subset of qubits.
-    return "teleportation" not in ll_path.name
+    return not ("adaptive_profile" in text and "reset__body" in text)
 
 
 _SIMULATABLE_NAMES = sorted(

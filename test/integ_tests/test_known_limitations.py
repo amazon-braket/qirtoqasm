@@ -40,42 +40,34 @@ from qirtoqasm import QirToQasmError
 FIXTURES = Path(__file__).parent / "fixtures_qir"
 
 
-# Fixture filename → regex that must appear in the exception message.
-_KNOWN_LIMITATIONS: dict[str, str] = {
-    # Controlled-H via the variadic ``generalizedInvoke...`` intrinsic:
-    # no Braket-native CH and no lowering table entry — must raise with
-    # the intrinsic name so the user knows to decompose upstream.
-    "cudaq_unsupported_ctrl_h.ll": "generalizedInvokeWithRotationsControlsTargets",
+# Fixture filename → substrings that must all appear in the exception message.
+_KNOWN_LIMITATIONS: dict[str, list[str]] = {
+    # Controlled-H via the variadic ``generalizedInvoke...`` intrinsic: no
+    # Braket-native CH and no lowering table entry. The error must name the
+    # intrinsic (the root cause) AND direct the user to the workaround
+    # (upstream decomposition).
+    "cudaq_unsupported_ctrl_h.ll": [
+        "generalizedInvokeWithRotationsControlsTargets",
+        "decomposition",
+    ],
 }
 
 
-@pytest.mark.parametrize("fixture_name,expected_substring", list(_KNOWN_LIMITATIONS.items()))
-def test_known_limitation_produces_actionable_error(
-    fixture_name: str, expected_substring: str
+@pytest.mark.parametrize("fixture_name,expected_substrings", list(_KNOWN_LIMITATIONS.items()))
+def test_known_limitation_error_names_root_cause_and_workaround(
+    fixture_name: str, expected_substrings: list[str]
 ) -> None:
     """Each known-limitation fixture must raise ``QirToQasmError`` with a
-    message that mentions the root cause.
+    message that names both the root cause (the intrinsic or opcode
+    that can't be lowered) and the workaround (typically upstream
+    decomposition). If this assertion fails because a fixture now
+    translates successfully, move it into the fixture-parity suite
+    and add an expected ``.qasm`` pair.
     """
     ir_path = FIXTURES / fixture_name
     assert ir_path.exists(), f"missing limitation fixture: {fixture_name}"
-    with pytest.raises(QirToQasmError, match=expected_substring):
+    with pytest.raises(QirToQasmError) as excinfo:
         qirtoqasm.translate(ir_path.read_text())
-
-
-def test_unmapped_controlled_gate_error_names_decomposition_workaround() -> None:
-    """The error for an unmapped multi-controlled gate must direct the
-    user to the workaround (upstream decomposition) and name the
-    variadic intrinsic driving the dispatch."""
-    ir_text = (FIXTURES / "cudaq_unsupported_ctrl_h.ll").read_text()
-    try:
-        qirtoqasm.translate(ir_text)
-    except QirToQasmError as e:
-        message = str(e)
-        assert "decomposition" in message, message
-        assert "generalizedInvokeWithRotationsControlsTargets" in message, message
-    else:  # pragma: no cover
-        pytest.fail(
-            "cudaq_unsupported_ctrl_h fixture unexpectedly succeeded. If "
-            "controlled-H is now supported, move the fixture to a "
-            ".qasm-paired fixture-parity test."
-        )
+    message = str(excinfo.value)
+    for substring in expected_substrings:
+        assert substring in message, message
