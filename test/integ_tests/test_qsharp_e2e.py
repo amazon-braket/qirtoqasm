@@ -114,6 +114,13 @@ def test_qsharp_iterative_phase_estimation() -> None:
             assert bits == "1100", (bits, "phase bits (LSB first) must be 1100")
 
 
+def test_qsharp_iterative_phase_estimation_loop_form() -> None:
+    result = _run("ipe4bit_loop.qs", "IPE4BitLoop()", "Adaptive_RI")
+    for bits, n in result["counts"].items():
+        if n > 0:
+            assert bits == "1100", (bits, "phase bits (LSB first) must be 1100")
+
+
 def test_qsharp_bell_reset_return() -> None:
     result = _run("bell_reset_return.qs", "BellSim()", "Base", native_sim=True)
 
