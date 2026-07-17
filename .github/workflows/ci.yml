@@ -157,6 +157,9 @@ jobs:
           fi
 
   # Byte-exact fixture regression + cross-simulator correctness.
+  # Matrix narrowed to 3-OS × 3.13: qirrunner is a native binary whose
+  # OS-specific behavior (segfaults, linkage) is in scope for these
+  # tests, but Python-version coverage is redundant with `build`.
   integ-fixture-parity:
     name: Integ / Fixture parity (${{ matrix.os }} / py ${{ matrix.python-version }})
     needs: [build, cpp-smoke, c-smoke]
@@ -165,7 +168,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.13"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
