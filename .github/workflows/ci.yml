@@ -157,6 +157,8 @@ jobs:
           fi
 
   # QIR → OpenQASM 3 translation, executed on the Braket LocalSimulator.
+  # Matrix narrowed to a single ubuntu × 3.13 cell: Braket LocalSimulator
+  # is Python code and cross-Python is covered by the `build` matrix.
   integ-braket:
     name: Integ / Braket (${{ matrix.os }} / py ${{ matrix.python-version }})
     needs: [build, cpp-smoke, c-smoke]
@@ -164,8 +166,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.11", "3.12", "3.13"]
+        os: [ubuntu-latest]
+        python-version: ["3.13"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6

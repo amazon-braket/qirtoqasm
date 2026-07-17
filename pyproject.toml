@@ -37,6 +37,7 @@ dependencies = []
 test = [
     "pytest>=8",
     "pytest-cov>=5",
+    "pytest-xdist>=3",
 ]
 # Lint / format / wheel build / release tooling.
 dev = [
