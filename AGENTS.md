@@ -541,21 +541,15 @@ All CI lives under `.github/workflows/`:
 
 ## Release process
 
-1. Branch and bump the version:
-   ```bash
-   git checkout -b release/v0.X.Y
-   # edit _version.py to 0.X.Y (drop the .devN suffix)
-   python scripts/sync_version.py
-   ```
-2. Open a PR, let CI go green, merge.
-3. Draft a GitHub release with tag `v0.X.Y`. Publishing triggers
-   `wheels.yml` (full matrix) + `publish-to-pypi.yml` (upload via
-   PyPI trusted publishing).
-4. Bump to the next dev version on `main`:
-   ```bash
-   # edit _version.py to 0.X.(Y+1).dev0
-   python scripts/sync_version.py
-   ```
+Releases are automated. Merges to `main` are grouped by their
+conventional-commit prefix (see `CONTRIBUTING.md`) and cut into
+tagged releases automatically — follow the commit-prefix
+conventions and the release infrastructure handles the rest.
+
+The tag triggers `wheels.yml` (per-platform wheel + sdist) and
+`publish-to-pypi.yml` (upload to PyPI via OIDC). Nothing to do
+manually — do NOT hand-edit `_version.py`, tag, or draft a
+GitHub release yourself.
 
 
 ## Gotchas

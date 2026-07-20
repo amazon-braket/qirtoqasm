@@ -241,20 +241,14 @@ All CI lives in `.github/workflows/`:
 
 ## Releasing
 
-1. Create a branch and bump the version:
-   ```bash
-   git checkout -b release/v0.1.0
-   sed -i.bak 's/0.1.0.dev0/0.1.0/' python/qirtoqasm/_version.py
-   python scripts/sync_version.py
-   ```
-2. Open a PR titled `infra: release v0.1.0` and merge once CI is
-   green.
-3. Draft a GitHub release with tag `v0.1.0`. Publishing the release
-   triggers both `wheels.yml` (full matrix build) and
-   `publish-to-pypi.yml` (uploads to PyPI via trusted publishing).
-4. After release, bump to the next dev version:
-   ```bash
-   sed -i.bak 's/0.1.0/0.1.1.dev0/' python/qirtoqasm/_version.py
-   python scripts/sync_version.py
-   ```
-   Commit on a new PR.
+Releases are automated. Merges to `main` are grouped by their
+conventional-commit prefix (see `CONTRIBUTING.md`) and cut into
+tagged releases without manual intervention — follow the commit
+prefix conventions and the rest happens automatically.
+
+The tag triggers `wheels.yml` (per-platform wheel + sdist build)
+and `publish-to-pypi.yml` (upload to PyPI via the OIDC trusted
+publisher configured in the `pypi` GitHub Actions environment).
+
+You do not manually edit `_version.py`, tag anything, or draft
+a GitHub release yourself.
