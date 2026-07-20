@@ -92,9 +92,7 @@ tox
 ```
 
 `tox` alone executes: `clean`, `linters`, `docs`, `unit-tests`,
-`integ-fixture-parity`, `integ-braket`, `integ-qsharp`. Skipped by default:
-`integ-cudaq` (which needs a heavy native install; run it explicitly
-when working on that path).
+`integ-fixture-parity`, `integ-braket`, `integ-qsharp`, `integ-cudaq`.
 
 
 ## Running individual tiers
@@ -104,12 +102,13 @@ when working on that path).
 | `tox -e linters`         | `ruff format` + `ruff check` (rewriting) + version-sync check |
 | `tox -e linters-check`   | Same, read-only (CI uses this) |
 | `tox -e docs`            | `sphinx-build` → `build/documentation/html` |
-| `tox -e serve-docs 8080` | Serve the built HTML on localhost |
+| `tox -e serve-docs`      | Serve the built HTML on `http://localhost:8000` |
 | `tox -e unit-tests`      | `pytest test/unit_tests/` with coverage, no Braket |
 | `tox -e integ-fixture-parity`    | Byte-exact `.ll` → `.qasm` regression + qirrunner vs Braket cross-sim |
 | `tox -e integ-braket`    | qirtoqasm → Braket LocalSimulator |
 | `tox -e integ-qsharp`    | Q# → QIR → qirtoqasm → Braket (subprocess-isolated) |
 | `tox -e integ-cudaq`     | CUDA-Q → QIR → qirtoqasm → Braket (Linux/macOS only) |
+| `tox -e integ-tests`     | Run every `integ-*` tier back-to-back |
 | `tox -e build-wheel`     | `maturin build` sanity check |
 | `tox -e twine-check`     | Build wheel + sdist, run `twine check` |
 
@@ -248,13 +247,12 @@ All CI lives in `.github/workflows/`:
    sed -i.bak 's/0.1.0.dev0/0.1.0/' python/qirtoqasm/_version.py
    python scripts/sync_version.py
    ```
-2. Add a changelog entry in `CHANGELOG.md`.
-3. Open a PR titled `infra: release v0.1.0` and merge once CI is
+2. Open a PR titled `infra: release v0.1.0` and merge once CI is
    green.
-4. Draft a GitHub release with tag `v0.1.0`. Publishing the release
+3. Draft a GitHub release with tag `v0.1.0`. Publishing the release
    triggers both `wheels.yml` (full matrix build) and
    `publish-to-pypi.yml` (uploads to PyPI via trusted publishing).
-5. After release, bump to the next dev version:
+4. After release, bump to the next dev version:
    ```bash
    sed -i.bak 's/0.1.0/0.1.1.dev0/' python/qirtoqasm/_version.py
    python scripts/sync_version.py

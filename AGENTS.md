@@ -198,9 +198,7 @@ tox
 ```
 
 The default `tox` envlist runs: `clean,linters,docs,unit-tests,
-integ-fixture-parity,integ-braket,integ-qsharp`. It does NOT run
-`integ-cudaq` (heavy native install) — invoke that separately when
-you're working on that path.
+integ-fixture-parity,integ-braket,integ-qsharp,integ-cudaq`.
 
 
 ## Build, test, lint cheat sheet
@@ -214,12 +212,13 @@ so local success means CI success.
 | `tox -e linters`         | Rewrite formatting, run ruff check + version-sync |
 | `tox -e linters-check`   | Read-only lint (CI uses this) |
 | `tox -e docs`            | Build Sphinx docs → `build/documentation/html/` |
-| `tox -e serve-docs 8080` | Serve the built HTML on `http://localhost:8080` |
+| `tox -e serve-docs`      | Serve the built HTML on `http://localhost:8000` |
 | `tox -e unit-tests`      | pytest unit suite (no Braket); 100% coverage required |
 | `tox -e integ-fixture-parity`    | `.ll` → `.qasm` byte-exact regression + qirrunner vs Braket cross-sim |
 | `tox -e integ-braket`    | qirtoqasm → Braket LocalSimulator |
 | `tox -e integ-qsharp`    | Q# → QIR → qirtoqasm → Braket (subprocess-isolated) |
 | `tox -e integ-cudaq`     | CUDA-Q → QIR → qirtoqasm → Braket (Linux + macOS) |
+| `tox -e integ-tests`     | Run every `integ-*` tier back-to-back |
 | `tox -e build-wheel`     | `maturin build` smoke (CI uses cibuildwheel) |
 | `tox -e twine-check`     | Build wheel + sdist, run `twine check` |
 
@@ -548,20 +547,15 @@ All CI lives under `.github/workflows/`:
    # edit _version.py to 0.X.Y (drop the .devN suffix)
    python scripts/sync_version.py
    ```
-2. Add a `CHANGELOG.md` entry.
-3. Open a PR, let CI go green, merge.
-4. Draft a GitHub release with tag `v0.X.Y`. Publishing triggers
+2. Open a PR, let CI go green, merge.
+3. Draft a GitHub release with tag `v0.X.Y`. Publishing triggers
    `wheels.yml` (full matrix) + `publish-to-pypi.yml` (upload via
    PyPI trusted publishing).
-5. Bump to the next dev version on `main`:
+4. Bump to the next dev version on `main`:
    ```bash
    # edit _version.py to 0.X.(Y+1).dev0
    python scripts/sync_version.py
    ```
-
-External prerequisites (PyPI trusted publisher setup, Read the Docs
-project setup, Codecov setup, GitHub repo vars, etc.) are set up
-outside this repo before the first tagged release.
 
 
 ## Gotchas
