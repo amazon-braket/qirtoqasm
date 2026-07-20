@@ -4,7 +4,7 @@
 #             CUDA-Q. 3 OS × 3 Py.
 # msrv      — rust 1.75 build + test on Ubuntu.
 #
-# integ-* (braket / qsharp / cudaq / golden) and the C/C++ smoke jobs
+# integ-* (braket / qsharp / cudaq / fixture-parity) and the C/C++ smoke jobs
 # land alongside the code they exercise.
 
 name: CI
@@ -155,3 +155,28 @@ jobs:
           else
             ./build/Release/qirtoqasm_c_smoke.exe
           fi
+
+  # Byte-exact fixture regression + cross-simulator correctness.
+  # Matrix narrowed to 3-OS × 3.13: qirrunner is a native binary whose
+  # OS-specific behavior (segfaults, linkage) is in scope for these
+  # tests, but Python-version coverage is redundant with `build`.
+  integ-fixture-parity:
+    name: Integ / Fixture parity (${{ matrix.os }} / py ${{ matrix.python-version }})
+    needs: [build, cpp-smoke, c-smoke]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install tox
+        run: pip install tox
+      - name: Run fixture-parity integ tests
+        run: tox -e integ-fixture-parity -- -q
