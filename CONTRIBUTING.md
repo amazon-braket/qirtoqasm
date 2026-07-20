@@ -88,7 +88,7 @@ consistency.
 1. Run the tests:
    ```bash
    # Full pre-PR suite (lint + docs + unit + integ-fixture-parity +
-   # integ-braket + integ-qsharp).
+   # integ-braket + integ-qsharp + integ-cudaq).
    tox
 
    # Individual tiers:

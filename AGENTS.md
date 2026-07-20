@@ -521,9 +521,9 @@ All CI lives under `.github/workflows/`:
     /permissive-`) on Ubuntu + macOS + Windows.
   - `c-smoke` — CMake build + run of `cmake/c_smoke.c` (C11,
     same warnings-as-errors set) on the same 3-OS matrix.
-    `integ-braket`, `integ-qsharp`, `integ-cudaq` all `needs:
-    [build, cpp-smoke, c-smoke]`, so a broken native ABI blocks the
-    Python integ tiers.
+    `integ-fixture-parity`, `integ-braket`, `integ-qsharp`,
+    `integ-cudaq` all `needs: [build, cpp-smoke, c-smoke]`, so a
+    broken native ABI blocks the Python integ tiers.
 - **`wheels.yml`** — cibuildwheel. PR runs a single-platform smoke;
   release tags + publications build the full matrix (Linux
   manylinux2014 + musllinux_1_2 × x86_64 / aarch64, macOS x86_64 +

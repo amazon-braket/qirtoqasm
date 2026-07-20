@@ -213,8 +213,8 @@ All CI lives in `.github/workflows/`:
 
 - **`ci.yml`** — the main pipeline. Runs on pushes to `main` and on
   pull requests. Jobs: `build` (3 OS × 3 py, cargo build/test + tox
-  unit-tests + tox integ-fixture-parity + Codecov), `msrv` (rust 1.75 on
-  Ubuntu), `coverage` (cargo-llvm-cov ≥ 97%), `integ-braket`,
+  unit-tests + Codecov), `msrv` (rust 1.75 on Ubuntu), `coverage`
+  (cargo-llvm-cov ≥ 97%), `integ-fixture-parity`, `integ-braket`,
   `integ-qsharp`, `integ-cudaq` (Linux + macOS only), `cpp-smoke`
   and `c-smoke` (each on Ubuntu + macOS + Windows, built via CMake
   with warnings-as-errors, asserting on translation output for all
