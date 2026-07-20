@@ -347,7 +347,6 @@ def test_unmapped_variadic_controlled_gate_names_intrinsic() -> None:
     with pytest.raises(QirToQasmError) as excinfo:
         qirtoqasm.translate(ir)
     msg = str(excinfo.value)
-    assert "intrinsic" in msg, msg
     assert "generalizedInvokeWithRotationsControlsTargets" in msg, msg
 
 

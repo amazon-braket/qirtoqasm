@@ -1503,6 +1503,53 @@ mod more_tests {
     use super::*;
 
     #[test]
+    fn translates_cudaq_llvm16_opaque_ptr_fixture() {
+        // End-to-end: QIR with opaque pointers plus quoted numeric block
+        // labels (the LLVM 15+ text form) must translate to valid Braket
+        // OpenQASM 3.
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("test")
+            .join("integ_tests")
+            .join("fixtures_qir")
+            .join("cudaq_llvm16_simple_x.ll");
+        let src = std::fs::read_to_string(path).unwrap();
+        let oq3 = crate::translator::Exporter::default()
+            .dumps(&parse_module(&src).unwrap())
+            .unwrap_or_else(|e| panic!("translate failed: {e}"));
+        assert!(oq3.contains("OPENQASM 3.0;"));
+        assert!(oq3.contains("qubit[1] q;"));
+        assert!(oq3.contains("x q[0];"));
+        assert!(oq3.contains("c[0] = measure q[0];"));
+    }
+
+    #[test]
+    fn translates_cudaq_llvm16_mcm_feedforward_fixture() {
+        // MCM plus a single-branch `if` with opaque pointers and quoted
+        // numeric block labels (the LLVM 15+ text form) must produce the
+        // same OpenQASM 3 as the typed-pointer / unquoted-label LLVM 14
+        // form emits for the equivalent kernel — see the corresponding
+        // non-`llvm16` fixture in the same directory.
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("test")
+            .join("integ_tests")
+            .join("fixtures_qir")
+            .join("cudaq_llvm16_mcm_feedforward.ll");
+        let src = std::fs::read_to_string(path).unwrap();
+        let oq3 = crate::translator::Exporter::default()
+            .dumps(&parse_module(&src).unwrap())
+            .unwrap_or_else(|e| panic!("translate failed: {e}"));
+        assert!(oq3.contains("h q[0];"), "\n{oq3}");
+        assert!(oq3.contains("c[0] = measure q[0];"), "\n{oq3}");
+        assert!(oq3.contains("if (c[0]"), "\n{oq3}");
+        assert!(oq3.contains("x q[1];"), "\n{oq3}");
+        assert!(oq3.contains("c[1] = measure q[1];"), "\n{oq3}");
+    }
+
+    #[test]
     fn split_u32_rejects_non_digit_prefix() {
         let (n, rest) = split_u32("abc");
         assert!(n.is_none());
