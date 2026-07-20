@@ -107,6 +107,14 @@ def test_qsharp_teleport() -> None:
             assert bits[2] == "0", (bits, result["counts"])
 
 
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "Blocked on amazon-braket/amazon-braket-default-simulator-python#388 "
+        "(per-classical-bit MCM outcome overlay in `_run_branched`). Remove "
+        "this marker once the fix ships to PyPI."
+    ),
+)
 def test_qsharp_iterative_phase_estimation() -> None:
     result = _run("ipe4bit.qs", "IPE4Bit()", "Adaptive_RI")
     for bits, n in result["counts"].items():
@@ -114,6 +122,14 @@ def test_qsharp_iterative_phase_estimation() -> None:
             assert bits == "1100", (bits, "phase bits (LSB first) must be 1100")
 
 
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "Blocked on amazon-braket/amazon-braket-default-simulator-python#388 "
+        "(per-classical-bit MCM outcome overlay in `_run_branched`). Remove "
+        "this marker once the fix ships to PyPI."
+    ),
+)
 def test_qsharp_iterative_phase_estimation_loop_form() -> None:
     result = _run("ipe4bit_loop.qs", "IPE4BitLoop()", "Adaptive_RI")
     for bits, n in result["counts"].items():
