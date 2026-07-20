@@ -2,7 +2,7 @@
 ; path with `numControls=1, numTargets=1` on a single-qubit gate that has
 ; a Braket-native controlled form (`cy`), in LLVM 16 textual-IR form
 ; (opaque `ptr`, quoted numeric block labels). This is the opaque-ptr
-; analogue of `cudaq_cy_via_ctrl.ll` (typed-pointer form) and is not
+; analog of `cudaq_cy_via_ctrl.ll` (typed-pointer form) and is not
 ; what the current CUDA-Q basis-gate pass actually emits for
 ; `y<cudaq::ctrl>(a,b)` - CUDA-Q currently decomposes CY to rz+cnot+rz
 ; before qirtoqasm runs. The fixture ensures qirtoqasm can still map the

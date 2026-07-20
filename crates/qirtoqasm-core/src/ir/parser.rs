@@ -720,7 +720,7 @@ fn parse_operand(chunk: &str) -> Result<Operand> {
     let value = value.trim();
 
     // Struct-pointer operand: either typed (%Qubit*, %"Qubit"*) or opaque ("ptr"),
-    // plus the `i8*` form CUDA-Q / Q# emit for C-string arguments to
+    // plus the `i8*` form producers emit for C-string arguments to
     // `__quantum__rt__*_record_output` calls.
     let struct_name = parse_struct_ptr_type(ty);
 
@@ -839,8 +839,8 @@ fn parse_inttoptr(value: &str) -> Option<i64> {
 }
 
 /// Extract the global name from a `bitcast (<ty> @<name> to <ty>)` operand.
-/// Used to recover the inner QIS function pointer CUDA-Q passes as the
-/// 5th argument to `generalizedInvokeWithRotationsControlsTargets`.
+/// Used to recover the inner QIS function pointer passed as the 5th
+/// argument to `generalizedInvokeWithRotationsControlsTargets`.
 /// Returns `None` if the bitcast does not name a global.
 fn extract_bitcast_global_name(value: &str) -> Option<String> {
     let body = value
@@ -1442,9 +1442,9 @@ mod tests {
 
     #[test]
     fn parses_zext_i1_to_integer() {
-        // Standard shape: `%r = zext i1 %src to i32` — cudaq's opt
-        // pipeline emits this to promote measurement bits to integers
-        // before summing them.
+        // Standard shape: `%r = zext i1 %src to i32` — used by producer
+        // opt pipelines to promote measurement bits to integers before
+        // summing them.
         let Instruction::Zext { result, src } =
             parse_instruction_line("%1 = zext i1 %0 to i32").unwrap()
         else {

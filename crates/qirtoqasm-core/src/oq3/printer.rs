@@ -6,7 +6,7 @@
 //!
 //! Matches `openqasm3.printer.Printer` (defaults: `indent="  "`,
 //! `chain_else_if=True`, `old_measurement=False`) for the emit
-//! subset used by the translator. Golden-fixture byte parity
+//! subset used by the translator. Fixture-parity byte comparison
 //! (Requirement 4) hinges on this module.
 
 use std::fmt::Write as _;

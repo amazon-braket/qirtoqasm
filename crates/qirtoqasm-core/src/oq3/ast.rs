@@ -5,7 +5,7 @@
 //! AST nodes emitted by the translator.
 //!
 //! This is intentionally a strict subset of OpenQASM 3: only the
-//! constructs `qirtoqasm` produces are modelled.
+//! constructs `qirtoqasm` produces are modeled.
 
 /// A complete program.
 #[derive(Debug, Clone, PartialEq)]
@@ -271,7 +271,7 @@ impl BinaryOp {
     }
 
     /// Return `true` iff the operator's result type is boolean (suitable
-    /// for feeding into `&&` / `||` without needing an `== 1` normalisation).
+    /// for feeding into `&&` / `||` without needing an `== 1` normalization).
     pub fn is_boolean_producing(self) -> bool {
         matches!(
             self,

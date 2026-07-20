@@ -5,13 +5,6 @@ Translate `QIR <https://github.com/qir-alliance/qir-spec>`_ programs
 (the QIR Base Profile and Adaptive Profile) to Braket-compatible
 `OpenQASM 3.0 <https://openqasm.com>`_.
 
-.. warning::
-
-   qirtoqasm is **not** an officially supported AWS product. This
-   experimental library offers QIR to OpenQASM 3 translation for use
-   with Amazon Braket. We may change, remove, or deprecate parts of
-   the qirtoqasm API without notice.
-
 The implementation is a pure-Rust core with four public faces:
 
 - A **Python package** (``qirtoqasm``) built via PyO3 + maturin. Single

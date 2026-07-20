@@ -147,8 +147,8 @@ pub enum Instruction {
         /// SSA id assigned by this alloca.
         result: String,
     },
-    /// `%result = bitcast <ty>* <src> to <ty>*` — used by cudaq to alias
-    /// an alloca region. We track `%result -> %src` as an alias.
+    /// `%result = bitcast <ty>* <src> to <ty>*` — used by producers to
+    /// alias an alloca region. We track `%result -> %src` as an alias.
     BitcastAlias {
         /// SSA id assigned by the bitcast.
         result: String,
@@ -156,7 +156,7 @@ pub enum Instruction {
         src: String,
     },
     /// `%result = getelementptr <ty>, <ty>* <src>, i32 0, i32 <offset>` —
-    /// cudaq's idiom for indexing into an alloca'd array. We only
+    /// a common idiom for indexing into an alloca'd array. We only
     /// recognize the two-index form with a leading `0`.
     GetElementPtrOffset {
         /// SSA id assigned by the gep.
@@ -166,16 +166,16 @@ pub enum Instruction {
         /// Array-element offset.
         offset: u64,
     },
-    /// `store <ty> <value>, <ty>* <ptr>` — cudaq stores constant scalar
-    /// values into alloca slots that are subsequently loaded as gate
-    /// arguments.
+    /// `store <ty> <value>, <ty>* <ptr>` — producers store constant
+    /// scalar values into alloca slots that are subsequently loaded as
+    /// gate arguments.
     Store {
         /// Stored value operand.
         value: Operand,
         /// Pointer SSA id (must be in the symbol table's alias map).
         ptr: String,
     },
-    /// `%result = load <ty>, <ty>* <ptr>` — cudaq loads previously
+    /// `%result = load <ty>, <ty>* <ptr>` — producers load previously
     /// stored scalar values out of an alloca slot to use as a gate
     /// argument.
     Load {
@@ -262,7 +262,7 @@ pub struct PhiIncoming {
 
 /// Parsed operand.
 ///
-/// The parser normalises the operand syntax so the translator can
+/// The parser normalizes the operand syntax so the translator can
 /// dispatch by variant instead of re-parsing text. See the parser
 /// module for acceptance rules (typed vs opaque pointers, hex vs
 /// decimal floats, `true`/`false` vs `0`/`1` for `i1`).
@@ -298,7 +298,7 @@ pub enum Operand {
     /// sites that the translator discards.
     GetElementPtr,
     /// A `bitcast (T* @<name> to i8*)` inlined into a call operand,
-    /// used as the inner-function pointer in CUDA-Q's variadic
+    /// used as the inner-function pointer in the variadic
     /// `generalizedInvokeWithRotationsControlsTargets` intrinsic. We
     /// capture the underlying global name so the variadic builder can
     /// resolve it (e.g. `"__quantum__qis__x__ctl"` → controlled X).

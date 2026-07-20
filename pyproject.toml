@@ -51,7 +51,7 @@ braket = [
     "amazon-braket-sdk>=1.95.0",
     "amazon-braket-default-simulator>=1.32.0",
 ]
-# QIR simulation for golden correctness tests.
+# QIR simulation for cross-simulator fixture-parity tests.
 qirrunner = [
     "qirrunner>=0.9",
 ]

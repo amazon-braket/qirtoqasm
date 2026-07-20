@@ -1,4 +1,4 @@
-; CUDA-Q native `--target braket` optimised adaptive-profile emission
+; CUDA-Q native `--target braket` optimized adaptive-profile emission
 ; for the `adaptive_repeat_count.cpp` kernel (count one-bits from 3
 ; measurements, apply X if count >= 2). Post-opt-pass LLVM collapses
 ; the would-be `phi i32` merge chain into a `select i1 %c, i32 A, i32 B`
