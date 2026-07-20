@@ -2,8 +2,10 @@ name: CodeQL
 
 # Advanced setup: replaces GitHub's Default CodeQL configuration so we
 # can build the Rust cdylib before CMake / CodeQL trace the C/C++
-# compiles, and so we can pin the Rust toolchain rustup component
-# choice for CodeQL's Rust extractor.
+# compiles. Rust and Python are analyzed in `build-mode: none`
+# (source-only, no compile trace); C/C++ uses `build-mode: manual`
+# because the Rust cdylib must be built before CMake can link
+# against it.
 
 on:
   push:
@@ -21,7 +23,7 @@ permissions:
 
 jobs:
   analyze:
-    name: CodeQL / ${{ matrix.language }}
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -32,7 +34,7 @@ jobs:
           - language: python
             build-mode: none
           - language: rust
-            build-mode: manual
+            build-mode: none
           - language: c-cpp
             build-mode: manual
 
@@ -40,40 +42,24 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python
-        if: matrix.language == 'python' || matrix.language == 'rust'
+        if: matrix.language == 'python'
         uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 
       - name: Set up Rust toolchain
-        if: matrix.language == 'rust' || matrix.language == 'c-cpp'
+        if: matrix.language == 'c-cpp'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        if: matrix.language == 'rust' || matrix.language == 'c-cpp'
+        if: matrix.language == 'c-cpp'
         uses: Swatinem/rust-cache@v2
-
-      - name: Install maturin (for qirtoqasm-py)
-        if: matrix.language == 'rust'
-        run: pip install "maturin>=1.5,<2.0"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-
-      # Rust: build the workspace default-members (qirtoqasm-core +
-      # qirtoqasm-ffi) via cargo, and qirtoqasm-py via maturin, so the
-      # CodeQL Rust extractor sees every crate. `qirtoqasm-py` is
-      # excluded from workspace default-members because its PyO3
-      # cdylib needs maturin-supplied link flags; a plain `cargo build`
-      # can't link it standalone.
-      - name: Build Rust workspace under CodeQL tracer
-        if: matrix.language == 'rust'
-        run: |
-          cargo build --locked
-          maturin build --release --locked -m crates/qirtoqasm-py/Cargo.toml
 
       # C/C++: cargo produces the FFI cdylib first (CMake targets link
       # against it), then CMake configures + builds both smoke targets
