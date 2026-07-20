@@ -161,19 +161,28 @@ fn build_generalized_controlled(
     // in `profile.rs`) would surface as a confusing error about
     // `generalizedInvokeWithRotationsControlsTargets` operands the user
     // never passed, obscuring the real bug in the classifier.
-    const EXPECTED_PREFIX: &[&str] = &["i64", "i64", "i64", "i64", "i8*"];
-    let prefix_ok = signature.param_types.len() >= EXPECTED_PREFIX.len()
+    //
+    // The 5th declared parameter carries the inner-function pointer.
+    // In canonical form (see `signatures::canonicalize_type`), typed
+    // pointers like `i8*` collapse to `i8` and LLVM 15+ opaque
+    // pointers appear as `ptr`; accept either.
+    const EXPECTED_LEADING: &[&str] = &["i64", "i64", "i64", "i64"];
+    let leading_ok = signature.param_types.len() > EXPECTED_LEADING.len()
         && signature
             .param_types
             .iter()
-            .zip(EXPECTED_PREFIX.iter())
+            .zip(EXPECTED_LEADING.iter())
             .all(|(got, exp)| got == exp);
-    if signature.name != CALLEE || !signature.is_variadic || !prefix_ok {
+    let fifth_ok = signature
+        .param_types
+        .get(EXPECTED_LEADING.len())
+        .is_some_and(|t| t == "i8" || t == "ptr");
+    if signature.name != CALLEE || !signature.is_variadic || !leading_ok || !fifth_ok {
         return Err(QirToQasmError::unsupported(format!(
             "generalized-controlled intrinsic {:?} has unexpected signature \
              {:?} (variadic={}); expected callee {CALLEE:?} with parameter \
-             prefix (\"i64\", \"i64\", \"i64\", \"i64\", \"i8*\", ...) and \
-             is_variadic=true",
+             prefix (\"i64\", \"i64\", \"i64\", \"i64\", \"i8\"|\"ptr\", ...) \
+             and is_variadic=true",
             signature.name, signature.param_types, signature.is_variadic,
         )));
     }
@@ -708,7 +717,8 @@ mod more_tests {
                 "i64".into(),
                 "i64".into(),
                 "i64".into(),
-                "i8*".into(),
+                // Canonical form of `i8*` after `signatures::canonicalize_type`.
+                "i8".into(),
             ],
             is_variadic: true,
         }
@@ -982,7 +992,7 @@ mod more_tests {
         // Same guard, tripped by a param-type-prefix mismatch rather than
         // a name mismatch. If a caller ever manages to reach this arm with
         // a signature whose fixed-arg prefix is not
-        // (i64, i64, i64, i64, i8*), we should reject early rather than
+        // (i64, i64, i64, i64, i8|ptr), we should reject early rather than
         // interpret garbage as rotation/control counts.
         let mut s = SymbolTable::new();
         let b = FunctionBuilder::GeneralizedControlled;
@@ -995,7 +1005,7 @@ mod more_tests {
                 "i64".into(),
                 "i64".into(),
                 "i64".into(),
-                "i8*".into(),
+                "i8".into(),
             ],
             is_variadic: true,
         };
@@ -1034,7 +1044,7 @@ mod more_tests {
                 "i64".into(),
                 "i64".into(),
                 "i64".into(),
-                "i8*".into(),
+                "i8".into(),
             ],
             is_variadic: false, // wrong
         };
@@ -1053,5 +1063,44 @@ mod more_tests {
             msg.contains("generalized-controlled intrinsic") && msg.contains("variadic=false"),
             "unexpected error message: {msg}"
         );
+    }
+
+    #[test]
+    fn generalized_controlled_accepts_opaque_ptr_fifth_param() {
+        // LLVM 15+ opaque-pointer variant: the 5th declared parameter is
+        // canonicalized to `ptr` (vs. `i8` for the typed-pointer `i8*` form).
+        // Both spellings appear in real producer output and both must be
+        // routed to the same lowering path.
+        let mut s = SymbolTable::new();
+        let b = FunctionBuilder::GeneralizedControlled;
+        let signature = FunctionSignature {
+            name: "generalizedInvokeWithRotationsControlsTargets".into(),
+            return_type: "void".into(),
+            param_types: vec![
+                "i64".into(),
+                "i64".into(),
+                "i64".into(),
+                "i64".into(),
+                "ptr".into(),
+            ],
+            is_variadic: true,
+        };
+        let args = vec![
+            Operand::ConstInt(0),
+            Operand::ConstInt(0),
+            Operand::ConstInt(2),
+            Operand::ConstInt(1),
+            Operand::BitcastGlobal("__quantum__qis__x__ctl".into()),
+            Operand::I8Null,
+            opaque(1),
+            opaque(2),
+        ];
+        let stmts = lower_call(&b, &signature, &args, None, &mut s).unwrap();
+        assert_eq!(stmts.len(), 1);
+        let crate::oq3::ast::Statement::QuantumGate { name, qubits, .. } = &stmts[0] else {
+            panic!("expected QuantumGate")
+        };
+        assert_eq!(name, "ccnot");
+        assert_eq!(qubits.len(), 3);
     }
 }

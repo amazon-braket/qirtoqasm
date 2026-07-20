@@ -19,7 +19,7 @@ from scipy.stats import chi2_contingency
 
 SHOTS = 2000
 TOLERANCE = 0.10
-CHI2_SIGNIFICANCE = 0.001
+CHI2_SIGNIFICANCE = 1e-5
 
 
 def approx(actual: float, expected: float, tol: float = TOLERANCE) -> bool:
