@@ -19,12 +19,10 @@ build:
     rust: "latest"
   jobs:
     # Install maturin and build/install the wheel from the source tree
-    # before Sphinx runs autodoc. This lets autodoc inspect the real
-    # PyO3-backed classes and surface their actual signatures, rather
-    # than the ``autodoc_mock_imports`` stubs (which we still keep as a
-    # fallback if an RTD build loses Rust for any reason).
+    # before Sphinx runs autodoc. This lets autodoc import the real
+    # PyO3-backed module and surface actual signatures.
     post_install:
-      - pip install 'maturin>=1.5,<2.0'
+      - pip install 'maturin~=1.5'
       - maturin develop --release
 
 python:

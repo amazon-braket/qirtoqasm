@@ -117,12 +117,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
-      - name: cargo llvm-cov (fail under 97 % lines)
+      - name: cargo llvm-cov (lcov + fail under 97 % lines)
         run: >
           cargo llvm-cov --package qirtoqasm-core
           --ignore-filename-regex '.*test_support\.rs$'
           --fail-under-lines 97
+          --lcov --output-path lcov.info
           --locked
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
 
   cpp-smoke:
     name: C++ smoke (${{ matrix.os }})
