@@ -41,20 +41,10 @@ endif()
 
 set(QIRTOQASM_CARGO_TARGET_DIR "${CARGO_BUILD_DIR}/${CARGO_PROFILE}")
 
-# On Linux, ask rustc to embed a SONAME in the cdylib so consumers'
-# DT_NEEDED records a bare filename instead of the .so path. Without
-# this the recorded path contains slashes, which per ld.so bypasses
-# RPATH search at runtime.
-if(UNIX AND NOT APPLE)
-    set(QIRTOQASM_CARGO_ENV
-        CARGO_TARGET_DIR=${CARGO_BUILD_DIR}
-        RUSTFLAGS=-Clink-arg=-Wl,-soname,libqirtoqasm.so
-    )
-else()
-    set(QIRTOQASM_CARGO_ENV
-        CARGO_TARGET_DIR=${CARGO_BUILD_DIR}
-    )
-endif()
+# SONAME injection on Linux is handled by crates/qirtoqasm-ffi/build.rs.
+set(QIRTOQASM_CARGO_ENV
+    CARGO_TARGET_DIR=${CARGO_BUILD_DIR}
+)
 
 add_custom_command(
     OUTPUT

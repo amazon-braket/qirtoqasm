@@ -1,6 +1,6 @@
 ; Reference input exercising the variadic-multi-controlled qirtoqasm code
 ; path with `numControls=2`, in LLVM 16 textual-IR form (opaque `ptr`,
-; quoted numeric block labels). This is the opaque-ptr analogue of
+; quoted numeric block labels). This is the opaque-ptr analog of
 ; `cudaq_toffoli.ll` (typed-pointer form) and is not what the current
 ; CUDA-Q basis-gate pass actually emits for `x<cudaq::ctrl>(a,b,c)` -
 ; with `x(1)` in the basis, CUDA-Q pre-decomposes CCX into 6 CNOTs + 7

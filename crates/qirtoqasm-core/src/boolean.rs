@@ -50,7 +50,7 @@ pub fn lower_icmp_i1(
 /// Lower an i1 binary operation (`xor` / `and` / `or`) to an OpenQASM
 /// 3 Boolean expression.
 ///
-/// `xor` recognises three shapes:
+/// `xor` recognizes three shapes:
 ///   * `xor i1 %x, true` / `xor i1 true, %x` — logical NOT, lowered
 ///     as `result = (x == 0)`.
 ///   * `xor i1 %x, false` / `xor i1 false, %x` — identity, `result = %x`.
@@ -58,7 +58,7 @@ pub fn lower_icmp_i1(
 ///     classical bits, semantically equivalent on Booleans to
 ///     inequality, lowered as `result = (a != b)`.
 ///
-/// `and` and `or` always lower to `&&` / `||` over Boolean-normalised
+/// `and` and `or` always lower to `&&` / `||` over Boolean-normalized
 /// operands.
 pub fn lower_binary_i1(
     result_key: &str,
@@ -347,9 +347,9 @@ fn resolve_i1_operand(symbols: &SymbolTable, op: &Operand) -> Result<Expression>
 /// `x*2 + (1-x)*1`, and substituting into `%b`'s formula gives the
 /// nested expression that ultimately feeds `add`/`icmp`/etc.
 ///
-/// CUDA-Q's optimised adaptive codegen emits this shape as a
-/// shorter alternative to the equivalent `phi i32` merges that Q#
-/// emits for the same source pattern.
+/// This shape appears in adaptive-profile codegen as a shorter
+/// alternative to the equivalent `phi i32` merges for the same source
+/// pattern.
 pub fn lower_select_integer(
     result_key: &str,
     cond: &Operand,
@@ -602,7 +602,7 @@ mod tests {
     #[test]
     fn select_i1_short_circuit_and_reduces_to_and() {
         // clang emits `cond && rhs` as `select i1 %cond, i1 %rhs, i1 false`.
-        // The lowering should recognise that shape and emit `cond && rhs`
+        // The lowering should recognize that shape and emit `cond && rhs`
         // rather than the fully-general `(cond && t) || (!cond && f)`.
         let mut s = SymbolTable::new();
         s.record_ssa("cond", index_expr("c", 0));
@@ -805,9 +805,9 @@ mod tests {
 
     #[test]
     fn select_i32_const_arms_lowers_to_inline_arithmetic() {
-        // `select i1 %cond, i32 2, i32 1` — the simplest shape cudaq's
-        // native `--target braket` opt pipeline emits as part of the
-        // phi→select collapse for integer accumulation.
+        // `select i1 %cond, i32 2, i32 1` — the simplest shape producer
+        // opt pipelines emit as part of the phi→select collapse for
+        // integer accumulation.
         let mut s = SymbolTable::new();
         s.record_ssa("cond", index_expr("c", 0));
         lower_select_i1(

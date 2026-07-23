@@ -29,8 +29,8 @@ Running the test suites
 -----------------------
 
 The project uses tox for every developer workflow. Running ``tox`` by
-itself executes the full pre-PR suite (lint, docs, unit tests, golden
-regression tests, and the Braket + Q# end-to-end tests).
+itself executes the full pre-PR suite (lint, docs, unit tests,
+fixture-parity regression tests, and the Braket + Q# end-to-end tests).
 
 .. code-block:: bash
 
@@ -40,8 +40,8 @@ regression tests, and the Braket + Q# end-to-end tests).
    # Unit tests (no Braket / Q# / CUDA-Q dependencies).
    tox -e unit-tests
 
-   # Golden .ll / .qasm regression suite (no Braket).
-   tox -e integ-golden
+   # Fixture-parity .ll / .qasm regression suite (no Braket).
+   tox -e integ-fixture-parity
 
    # qirtoqasm → Braket LocalSimulator end-to-end.
    tox -e integ-braket

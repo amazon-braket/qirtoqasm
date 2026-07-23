@@ -87,16 +87,16 @@ consistency.
    ```
 1. Run the tests:
    ```bash
-   # Full pre-PR suite (lint + docs + unit + integ-golden +
-   # integ-braket + integ-qsharp).
+   # Full pre-PR suite (lint + docs + unit + integ-fixture-parity +
+   # integ-braket + integ-qsharp + integ-cudaq).
    tox
 
    # Individual tiers:
-   tox -e unit-tests      # unit tests only
-   tox -e integ-golden    # .ll / .qasm regression suite (no Braket)
-   tox -e integ-braket    # qirtoqasm → Braket LocalSimulator
-   tox -e integ-qsharp    # Q# → qirtoqasm → Braket
-   tox -e integ-cudaq     # CUDA-Q → qirtoqasm → Braket (Linux/macOS only)
+   tox -e unit-tests            # unit tests only
+   tox -e integ-fixture-parity  # .ll / .qasm regression suite (no Braket)
+   tox -e integ-braket          # qirtoqasm → Braket LocalSimulator
+   tox -e integ-qsharp          # Q# → qirtoqasm → Braket
+   tox -e integ-cudaq           # CUDA-Q → qirtoqasm → Braket (Linux/macOS only)
    ```
 
 You can pass pytest arguments through tox with `--`, e.g.

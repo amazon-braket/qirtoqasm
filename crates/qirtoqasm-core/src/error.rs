@@ -45,7 +45,7 @@ impl QirToQasmError {
     }
 }
 
-/// `Result<T>` specialised to [`QirToQasmError`].
+/// `Result<T>` specialized to [`QirToQasmError`].
 pub type Result<T> = std::result::Result<T, QirToQasmError>;
 
 #[cfg(test)]

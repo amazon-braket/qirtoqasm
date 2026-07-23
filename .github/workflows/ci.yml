@@ -75,6 +75,22 @@ jobs:
       - name: Run tox unit-tests
         run: tox -e unit-tests -- -q
 
+      # Emit an abi3 wheel once per OS (py 3.11 is enough — abi3 wheels
+      # work across all supported Pythons for the same OS). The integ
+      # jobs pick this up via download-artifact so they don't re-invoke
+      # maturin from source.
+      - name: Build release wheel
+        if: matrix.python-version == '3.11'
+        run: tox -e build-wheel
+      - name: Upload release wheel
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qirtoqasm-wheel-${{ matrix.os }}
+          path: dist/qirtoqasm-*.whl
+          if-no-files-found: error
+          retention-days: 1
+
   # MSRV enforcement: the declared `rust-version = 1.85` must still build.
   msrv:
     name: MSRV (rust 1.85)
@@ -174,12 +190,17 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install tox
-        run: pip install tox
+      - name: Download release wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: qirtoqasm-wheel-${{ matrix.os }}
+          path: dist
+      - name: Install release wheel + integ deps
+        shell: bash
+        run: |
+          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket,qirrunner]"
       - name: Run fixture-parity integ tests
-        run: tox -e integ-fixture-parity -- -q
+        run: pytest test/integ_tests/test_fixture_parity.py test/integ_tests/test_known_limitations.py -n auto -p no:anyio -q
 
   # QIR → OpenQASM 3 translation, executed on the Braket LocalSimulator.
   # Matrix narrowed to a single ubuntu × 3.13 cell: Braket LocalSimulator
@@ -198,12 +219,17 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install tox
-        run: pip install tox
+      - name: Download release wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: qirtoqasm-wheel-${{ matrix.os }}
+          path: dist
+      - name: Install release wheel + integ deps
+        shell: bash
+        run: |
+          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket]"
       - name: Run Braket e2e integ tests
-        run: tox -e integ-braket -- -q
+        run: pytest test/integ_tests/test_braket_e2e.py -n auto -p no:anyio -q
 
   # Q# → QIR → qirtoqasm → Braket, subprocess-isolated per test case.
   integ-qsharp:
@@ -220,12 +246,17 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install tox
-        run: pip install tox
+      - name: Download release wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: qirtoqasm-wheel-${{ matrix.os }}
+          path: dist
+      - name: Install release wheel + integ deps
+        shell: bash
+        run: |
+          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket,qsharp]"
       - name: Run Q# e2e integ tests
-        run: tox -e integ-qsharp -- -q
+        run: pytest test/integ_tests/test_qsharp_e2e.py -n auto -p no:anyio -q
 
   # CUDA-Q → QIR → qirtoqasm → Braket. Linux + macOS only — no Windows wheels.
   # Subprocess-isolated per test case: CUDA-Q's MLIR JIT carries process-wide
@@ -248,9 +279,14 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install tox
-        run: pip install tox
+      - name: Download release wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: qirtoqasm-wheel-${{ matrix.os }}
+          path: dist
+      - name: Install release wheel + integ deps
+        shell: bash
+        run: |
+          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket,cudaq]"
       - name: Run CUDA-Q e2e integ tests
-        run: tox -e integ-cudaq -- -q
+        run: pytest test/integ_tests/test_cudaq_e2e.py -n auto -p no:anyio -q

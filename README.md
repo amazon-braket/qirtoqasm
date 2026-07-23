@@ -6,14 +6,10 @@
 [![codecov](https://codecov.io/gh/amazon-braket/qirtoqasm/graph/badge.svg)](https://codecov.io/gh/amazon-braket/qirtoqasm)
 [![Documentation Status](https://readthedocs.org/projects/qirtoqasm/badge/?version=latest)](https://qirtoqasm.readthedocs.io/en/latest/?badge=latest)
 
-**qirtoqasm is not an officially supported AWS product.**
-
-This experimental library translates [QIR](https://github.com/qir-alliance/qir-spec)
+This library translates [QIR](https://github.com/qir-alliance/qir-spec)
 programs (the [QIR Base Profile](https://github.com/qir-alliance/qir-spec/blob/main/specification/under_development/profiles/Base_Profile.md)
 and [Adaptive Profile](https://github.com/qir-alliance/qir-spec/blob/main/specification/under_development/profiles/Adaptive_Profile.md))
-to **Braket-compatible [OpenQASM 3.0](https://openqasm.com)**. qirtoqasm
-is _experimental_ software. We may change, remove, or deprecate parts
-of the qirtoqasm API without notice.
+to **Braket-compatible [OpenQASM 3.0](https://openqasm.com)**.
 
 
 ## Why qirtoqasm?

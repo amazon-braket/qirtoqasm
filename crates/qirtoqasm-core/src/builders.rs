@@ -252,14 +252,14 @@ fn build_generalized_controlled(
         // for `i8* null` and `PtrConst { struct_name: None, ... }` for
         // `i8* inttoptr`. Normalise the former to qubit 0 so the shared
         // resolver (which only understands `PtrConst`) can handle both.
-        let normalised = match op {
+        let normalized = match op {
             Operand::I8Null => Operand::PtrConst {
                 struct_name: None,
                 index: 0,
             },
             other => other.clone(),
         };
-        qubits.push(resolve_qubit_operand(symbols, &normalised, CALLEE)?);
+        qubits.push(resolve_qubit_operand(symbols, &normalized, CALLEE)?);
     }
 
     let gate_name =

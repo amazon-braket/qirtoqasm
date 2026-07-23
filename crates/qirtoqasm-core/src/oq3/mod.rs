@@ -4,7 +4,7 @@
 
 //! Minimal OpenQASM 3 AST + byte-exact pretty-printer.
 //!
-//! Only the subset of OQ3 the translator actually emits is modelled.
+//! Only the subset of OQ3 the translator actually emits is modeled.
 //! The printer matches the formatting of the official
 //! [`openqasm3`](https://pypi.org/project/openqasm3/) Python pretty-printer
 //! (with the defaults `indent="  "`, `chain_else_if=True`,
