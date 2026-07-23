@@ -205,7 +205,7 @@ jobs:
       - name: Install release wheel + integ deps
         shell: bash
         run: |
-          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket,qirrunner]"
+          pip install "$(ls dist/qirtoqasm-*.whl)[test]"
       - name: Run fixture-parity integ tests
         run: pytest test/integ_tests/test_fixture_parity.py test/integ_tests/test_known_limitations.py -n auto -p no:anyio -q
 
@@ -234,7 +234,7 @@ jobs:
       - name: Install release wheel + integ deps
         shell: bash
         run: |
-          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket]"
+          pip install "$(ls dist/qirtoqasm-*.whl)[test]"
       - name: Run Braket e2e integ tests
         run: pytest test/integ_tests/test_braket_e2e.py -n auto -p no:anyio -q
 
@@ -261,7 +261,7 @@ jobs:
       - name: Install release wheel + integ deps
         shell: bash
         run: |
-          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket,qsharp]"
+          pip install "$(ls dist/qirtoqasm-*.whl)[test,qsharp]"
       - name: Run Q# e2e integ tests
         run: pytest test/integ_tests/test_qsharp_e2e.py -n auto -p no:anyio -q
 
@@ -294,6 +294,6 @@ jobs:
       - name: Install release wheel + integ deps
         shell: bash
         run: |
-          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket,cudaq]"
+          pip install "$(ls dist/qirtoqasm-*.whl)[test,cudaq]"
       - name: Run CUDA-Q e2e integ tests
         run: pytest test/integ_tests/test_cudaq_e2e.py -n auto -p no:anyio -q
