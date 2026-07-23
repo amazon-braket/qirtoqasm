@@ -23,7 +23,7 @@ build:
     # PyO3-backed module and surface actual signatures.
     post_install:
       - pip install 'maturin~=1.5'
-      - maturin develop --release
+      - VIRTUAL_ENV=$READTHEDOCS_VIRTUALENV_PATH maturin develop --release
 
 python:
   install:
