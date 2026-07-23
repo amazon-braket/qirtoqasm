@@ -73,7 +73,7 @@ git commit -m "feature: bump version to X.Y.Z"
 one file without the other.
 
 
-## Day-to-day workflow
+## Local development workflow
 
 ```bash
 # 1. Create a clean Python environment (once).
@@ -95,7 +95,7 @@ tox
 `integ-fixture-parity`, `integ-braket`, `integ-qsharp`, `integ-cudaq`.
 
 
-## Running individual tiers
+## Running individual tox environments
 
 | Command                  | What it does |
 |--------------------------|--------------|
