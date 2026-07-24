@@ -117,12 +117,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
-      - name: cargo llvm-cov (fail under 97 % lines)
+      - name: cargo llvm-cov (lcov + fail under 97 % lines)
         run: >
           cargo llvm-cov --package qirtoqasm-core
           --ignore-filename-regex '.*test_support\.rs$'
           --fail-under-lines 97
+          --lcov --output-path lcov.info
           --locked
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
 
   cpp-smoke:
     name: C++ smoke (${{ matrix.os }})
@@ -198,7 +205,7 @@ jobs:
       - name: Install release wheel + integ deps
         shell: bash
         run: |
-          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket,qirrunner]"
+          pip install "$(ls dist/qirtoqasm-*.whl)[test]"
       - name: Run fixture-parity integ tests
         run: pytest test/integ_tests/test_fixture_parity.py test/integ_tests/test_known_limitations.py -n auto -p no:anyio -q
 
@@ -227,7 +234,7 @@ jobs:
       - name: Install release wheel + integ deps
         shell: bash
         run: |
-          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket]"
+          pip install "$(ls dist/qirtoqasm-*.whl)[test]"
       - name: Run Braket e2e integ tests
         run: pytest test/integ_tests/test_braket_e2e.py -n auto -p no:anyio -q
 
@@ -254,7 +261,7 @@ jobs:
       - name: Install release wheel + integ deps
         shell: bash
         run: |
-          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket,qsharp]"
+          pip install "$(ls dist/qirtoqasm-*.whl)[test,qsharp]"
       - name: Run Q# e2e integ tests
         run: pytest test/integ_tests/test_qsharp_e2e.py -n auto -p no:anyio -q
 
@@ -287,6 +294,6 @@ jobs:
       - name: Install release wheel + integ deps
         shell: bash
         run: |
-          pip install "$(ls dist/qirtoqasm-*.whl)[test,braket,cudaq]"
+          pip install "$(ls dist/qirtoqasm-*.whl)[test,cudaq]"
       - name: Run CUDA-Q e2e integ tests
         run: pytest test/integ_tests/test_cudaq_e2e.py -n auto -p no:anyio -q

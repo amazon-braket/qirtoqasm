@@ -33,11 +33,14 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-# Unit-test extras. No Braket / Q# / CUDA-Q.
+# Test extras for unit tests and basic integration tests.
 test = [
     "pytest>=8",
     "pytest-cov>=5",
     "pytest-xdist>=3",
+    "amazon-braket-sdk>=1.95.0",
+    "amazon-braket-default-simulator>=1.32.0",
+    "qirrunner>=0.9",
 ]
 # Lint / format / wheel build / release tooling.
 dev = [
@@ -45,15 +48,6 @@ dev = [
     "ruff>=0.6",
     "build>=1.0",
     "twine>=5.0",
-]
-# qirtoqasm → Braket end-to-end integ tests.
-braket = [
-    "amazon-braket-sdk>=1.95.0",
-    "amazon-braket-default-simulator>=1.32.0",
-]
-# QIR simulation for cross-simulator fixture-parity tests.
-qirrunner = [
-    "qirrunner>=0.9",
 ]
 # Microsoft Q# → QIR → qirtoqasm → Braket. Linux / macOS / Windows.
 qsharp = [

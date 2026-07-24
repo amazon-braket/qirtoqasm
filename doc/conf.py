@@ -51,13 +51,9 @@ extensions = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "_apidoc", "Thumbs.db", ".DS_Store"]
 
 # -- autodoc / apidoc --------------------------------------------------------
-
-# Mock the native extension so autodoc can import the shim without a
-# Rust toolchain on the docs runner.
-autodoc_mock_imports = ["qirtoqasm._qirtoqasm_native"]
 
 autodoc_default_options = {
     "members": True,
