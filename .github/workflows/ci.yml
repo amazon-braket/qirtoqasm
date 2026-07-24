@@ -125,11 +125,10 @@ jobs:
           --lcov --output-path lcov.info
           --locked
       - name: Upload coverage to Codecov
-        if: always()
         uses: codecov/codecov-action@v7
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
-          fail_ci_if_error: false
 
   cpp-smoke:
     name: C++ smoke (${{ matrix.os }})
