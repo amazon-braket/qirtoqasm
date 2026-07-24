@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "qirtoqasm-core"
-version = "0.1.0"
+version = "0.1.1-dev0"
 dependencies = [
  "indexmap",
  "thiserror",
@@ -124,14 +124,14 @@ dependencies = [
 
 [[package]]
 name = "qirtoqasm-ffi"
-version = "0.1.0"
+version = "0.1.1-dev0"
 dependencies = [
  "qirtoqasm-core",
 ]
 
 [[package]]
 name = "qirtoqasm-py"
-version = "0.1.0"
+version = "0.1.1-dev0"
 dependencies = [
  "pyo3",
  "qirtoqasm-core",
