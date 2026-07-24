@@ -78,6 +78,7 @@ manifest-path = "crates/qirtoqasm-py/Cargo.toml"
 module-name = "qirtoqasm._qirtoqasm_native"
 python-source = "python"
 features = ["pyo3/extension-module"]
+include = ["LICENSE", "NOTICE"]
 
 [tool.pytest.ini_options]
 # ``-p no:anyio`` is load-bearing — anyio's pytest plugin can crash the
