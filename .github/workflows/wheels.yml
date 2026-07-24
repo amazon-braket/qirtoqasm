@@ -62,7 +62,7 @@ jobs:
           CIBW_BEFORE_ALL_LINUX: "curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable --profile minimal"
           CIBW_ENVIRONMENT_LINUX: 'PATH="$HOME/.cargo/bin:$PATH"'
           CIBW_BEFORE_ALL_MACOS: "rustup target add x86_64-apple-darwin"
-          CIBW_ENVIRONMENT_MACOS: 'MACOSX_DEPLOYMENT_TARGET=10.13'
+          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=${{ matrix.arch == 'x86_64' && '10.13' || '11.0' }}
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux2014
           CIBW_MUSLLINUX_X86_64_IMAGE: musllinux_1_2
