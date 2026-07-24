@@ -50,7 +50,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VERSION_PY = REPO_ROOT / "python" / "qirtoqasm" / "_version.py"
 CARGO_TOML = REPO_ROOT / "Cargo.toml"
+CARGO_LOCK = REPO_ROOT / "Cargo.lock"
 
+_WORKSPACE_CRATES = ("qirtoqasm-core", "qirtoqasm-ffi", "qirtoqasm-py")
 _VERSION_PY_RE = re.compile(r'^__version__\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
 _CARGO_VERSION_RE = re.compile(
     r'(?m)^(\[workspace\.package\][^\[]*?^version\s*=\s*)"([^"]+)"',
@@ -129,6 +131,45 @@ def rewrite_cargo_version(new_version: str) -> bool:
     return True
 
 
+def _cargo_lock_entry_re(crate: str) -> re.Pattern[str]:
+    """Match a specific workspace crate's ``[[package]]`` block in Cargo.lock,
+    capturing the ``version = "..."`` line inside it."""
+    return re.compile(
+        rf'(\[\[package\]\]\s*\nname\s*=\s*"{re.escape(crate)}"\s*\nversion\s*=\s*)'
+        r'"([^"]+)"',
+    )
+
+
+def read_cargo_lock_versions() -> dict[str, str]:
+    """Return the current version pinned in Cargo.lock for each workspace crate."""
+    text = CARGO_LOCK.read_text()
+    versions: dict[str, str] = {}
+    for crate in _WORKSPACE_CRATES:
+        match = _cargo_lock_entry_re(crate).search(text)
+        if not match:
+            raise SystemExit(f"Could not find [[package]] entry for {crate} in {CARGO_LOCK}")
+        versions[crate] = match.group(2)
+    return versions
+
+
+def rewrite_cargo_lock(new_version: str) -> bool:
+    """Rewrite each workspace crate's version in Cargo.lock. Return True if any changed."""
+    text = CARGO_LOCK.read_text()
+    changed = False
+    for crate in _WORKSPACE_CRATES:
+        pattern = _cargo_lock_entry_re(crate)
+        match = pattern.search(text)
+        if not match:
+            raise SystemExit(f"Could not find [[package]] entry for {crate} in {CARGO_LOCK}")
+        if match.group(2) == new_version:
+            continue
+        text = text[: match.start()] + match.group(1) + f'"{new_version}"' + text[match.end() :]
+        changed = True
+    if changed:
+        CARGO_LOCK.write_text(text)
+    return changed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -141,6 +182,7 @@ def main() -> int:
     py_version = read_python_version()
     cargo_expected = pep440_to_cargo(py_version)
     cargo_actual = read_cargo_version()
+    lock_actual = read_cargo_lock_versions()
 
     if args.check:
         if cargo_actual != cargo_expected:
@@ -152,17 +194,29 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
+        stale_lock = {c: v for c, v in lock_actual.items() if v != cargo_expected}
+        if stale_lock:
+            print(
+                f"Cargo.lock out of sync: expected {cargo_expected!r} for all "
+                f"workspace crates, found {stale_lock!r}. "
+                f"Run `python scripts/sync_version.py` to fix.",
+                file=sys.stderr,
+            )
+            return 1
         print(f"Version sync OK: {py_version} ↔ {cargo_actual}")
         return 0
 
-    changed = rewrite_cargo_version(cargo_expected)
-    if changed:
+    toml_changed = rewrite_cargo_version(cargo_expected)
+    lock_changed = rewrite_cargo_lock(cargo_expected)
+    if toml_changed:
         print(
             f"Updated Cargo.toml: [workspace.package].version = "
             f'"{cargo_expected}" (from _version.py={py_version})'
         )
-    else:
-        print(f"Cargo.toml already in sync: {cargo_actual}")
+    if lock_changed:
+        print(f'Updated Cargo.lock: workspace crate versions → "{cargo_expected}"')
+    if not toml_changed and not lock_changed:
+        print(f"Cargo.toml and Cargo.lock already in sync: {cargo_actual}")
     return 0
 
 

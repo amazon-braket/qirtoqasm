@@ -1,24 +1,29 @@
-# Publish wheels + sdist to PyPI via trusted publishing (OIDC) when a
-# GitHub release is published. Requires a PyPI trusted publisher for
-# this repo pointed at this workflow file and the ``pypi`` environment
-# below. See https://docs.pypi.org/trusted-publishers/ for setup.
+# Build wheels + sdist and publish to PyPI via trusted publishing (OIDC)
+# when a GitHub release is published. The build matrix lives in
+# `wheels.yml` and is invoked here via `workflow_call`.
+#
+# Requires a PyPI trusted publisher for this repo pointed at this workflow
+# file and the ``pypi`` environment below. See
+# https://docs.pypi.org/trusted-publishers/ for setup.
 
 name: Publish to PyPI
 
 on:
   release:
     types: [published]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  # Wait for wheels.yml (triggered by the same release event) to finish
-  # and upload its artifacts; then download them here and publish in one
-  # step.
+  build:
+    uses: ./.github/workflows/wheels.yml
+    permissions:
+      contents: read
+
   publish:
     name: Publish distribution to PyPI
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -26,31 +31,18 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - name: Wait for wheels.yml artifacts
-        uses: lewagon/wait-on-check-action@v1.8.1
-        with:
-          ref: ${{ github.sha }}
-          check-name: sdist
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 20
-          allowed-conclusions: success
-
       - name: Download wheel artifacts
         uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           merge-multiple: true
           path: dist
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.run_id }}
 
       - name: Download sdist artifact
         uses: actions/download-artifact@v8
         with:
           name: sdist
           path: dist
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.run_id }}
 
       - name: List artifacts
         run: ls -la dist/
