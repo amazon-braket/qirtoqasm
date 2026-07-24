@@ -1,7 +1,7 @@
-# Full per-platform wheel + sdist matrix. Runs on `v*` tag pushes,
-# manual workflow_dispatch, or a `workflow_call` from `publish-to-pypi.yml`
-# on release publication. The PR-time smoke build lives in
-# `wheel-smoke.yml`.
+# Full per-platform wheel + sdist matrix. Runs via `workflow_call` from
+# `publish-to-pypi.yml` on release publication, or via manual
+# `workflow_dispatch` for one-off testing. The PR-time smoke build lives
+# in `wheel-smoke.yml`.
 #
 # Matrix: Linux (manylinux2014 + musllinux_1_2 on x86_64; manylinux2014
 # on aarch64 via QEMU), macOS (x86_64 + arm64), Windows (x86_64). Because
@@ -14,9 +14,6 @@
 name: Build wheels
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
   workflow_call:
 
