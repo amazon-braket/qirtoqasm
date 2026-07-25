@@ -58,7 +58,7 @@ qsharp = [
 # regression that fails to resolve return-typed kernel thunks
 # (`Symbols not found: [_kernel...thunk]`) during `cudaq.run`.
 cudaq = [
-    "cudaq==0.14.2; sys_platform != 'win32'",
+    "cudaq==0.15.0; sys_platform != 'win32'",
 ]
 # Sphinx documentation build (Read the Docs).
 docs = [
