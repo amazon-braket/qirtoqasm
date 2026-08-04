@@ -54,11 +54,9 @@ qsharp = [
     "qsharp>=1.19",
 ]
 # NVIDIA CUDA-Q → QIR → qirtoqasm → Braket. Linux / macOS only — no
-# Windows wheels. Pinned to 0.14.2 — cudaq 0.15.0 has an MLIR JIT
-# regression that fails to resolve return-typed kernel thunks
-# (`Symbols not found: [_kernel...thunk]`) during `cudaq.run`.
+# Windows wheels.
 cudaq = [
-    "cudaq==0.15.0; sys_platform != 'win32'",
+    "cudaq>=0.15.1; sys_platform != 'win32'",
 ]
 # Sphinx documentation build (Read the Docs).
 docs = [
