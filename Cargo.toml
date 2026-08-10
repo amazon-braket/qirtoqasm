@@ -30,7 +30,7 @@ repository = "https://github.com/amazon-braket/qirtoqasm"
 qirtoqasm-core = { path = "crates/qirtoqasm-core" }
 thiserror = "=2.0.19"
 indexmap = "=2.14.0"
-pyo3 = { version = "=0.29.0", features = ["extension-module", "abi3-py311"] }
+pyo3 = { version = "=0.29.1", features = ["extension-module", "abi3-py311"] }
 
 [profile.release]
 lto = "thin"
