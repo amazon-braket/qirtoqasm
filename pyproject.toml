@@ -56,7 +56,7 @@ qsharp = [
 # NVIDIA CUDA-Q → QIR → qirtoqasm → Braket. Linux / macOS only — no
 # Windows wheels.
 cudaq = [
-    "cudaq>=0.15.1; sys_platform != 'win32'",
+    "cudaq>=0.15.2; sys_platform != 'win32'",
 ]
 # Sphinx documentation build (Read the Docs).
 docs = [
