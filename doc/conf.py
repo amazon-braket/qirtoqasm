@@ -96,11 +96,7 @@ LLMS_TXT_SECTIONS: dict[str, tuple[str, ...]] = {
 
 
 def _llms_txt_section(docname: str) -> str:
-    """Return the llms.txt section heading a document belongs under.
-
-    Sections are tried in declaration order, so the first matching prefix wins.
-    A document that matches no prefix goes under the first section.
-    """
+    """Return the llms.txt section heading a document belongs under."""
     for heading, prefixes in LLMS_TXT_SECTIONS.items():
         if any(docname.startswith(prefix) for prefix in prefixes):
             return heading
