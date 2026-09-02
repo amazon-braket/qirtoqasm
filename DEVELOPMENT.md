@@ -16,7 +16,7 @@ qirtoqasm/
 ├── python/qirtoqasm/                thin Python re-export shim + canonical _version.py
 ├── include/qirtoqasm/                C / C++20 headers for the FFI
 ├── cmake/                          find_package config + C / C++ smoke tests
-├── scripts/sync_version.py         propagate _version.py → Cargo.toml
+├── scripts/sync_version.py         propagate _version.py → pyproject.toml + Cargo.toml
 ├── test/
 │   ├── unit_tests/                 pytest against the Rust-backed wheel
 │   └── integ_tests/                fixtures + fixture-parity + e2e (braket / qsharp / cudaq)
@@ -26,8 +26,9 @@ qirtoqasm/
 
 Top-level config: `Cargo.toml`, `pyproject.toml`, `tox.ini`,
 `CMakeLists.txt`, `rust-toolchain.toml`. `tox.ini` is the single
-source of truth for dev + CI; the Rust workspace version is kept in
-sync with `python/qirtoqasm/_version.py` by `scripts/sync_version.py`.
+source of truth for dev + CI; the published and Rust workspace versions
+are kept in sync with `python/qirtoqasm/_version.py` by
+`scripts/sync_version.py`.
 
 
 ## Prerequisites
@@ -52,25 +53,29 @@ The **single source of truth** for the package version is
 __version__ = "0.1.0.dev0"
 ```
 
-`scripts/sync_version.py` translates that PEP 440 string to a Cargo
-semver form (`0.1.0.dev0` → `0.1.0-dev0`) and rewrites
-`Cargo.toml [workspace.package].version`. To bump the version:
+`scripts/sync_version.py` propagates that PEP 440 string to two places:
+`pyproject.toml [project].version` gets it verbatim (this is what
+maturin publishes), and `Cargo.toml [workspace.package].version` gets a
+Cargo semver translation (`0.1.0.dev0` → `0.1.0-dev0`). The published
+version deliberately does *not* come from `Cargo.toml`: `.postN` has no
+semver equivalent and can only be encoded as `+postN`, which PyPI
+rejects as a local version. To bump the version:
 
 ```bash
 # 1. Edit _version.py.
 vim python/qirtoqasm/_version.py
 
-# 2. Propagate to Cargo.toml.
+# 2. Propagate to pyproject.toml and Cargo.toml.
 python scripts/sync_version.py
 
-# 3. Commit both files together.
-git add python/qirtoqasm/_version.py Cargo.toml
+# 3. Commit the files together.
+git add python/qirtoqasm/_version.py pyproject.toml Cargo.toml Cargo.lock
 git commit -m "feature: bump version to X.Y.Z"
 ```
 
 `tox -e linters` and `tox -e linters-check` both run
 `sync_version.py --check`, so CI will fail on any change that edits
-one file without the other.
+one file without the others.
 
 
 ## Local development workflow

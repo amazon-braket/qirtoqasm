@@ -12,32 +12,23 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 
-"""Sync the Rust workspace version in Cargo.toml with the Python
-``_version.py`` source of truth.
+"""Sync the packaging versions in ``pyproject.toml`` and ``Cargo.toml``
+with the Python ``_version.py`` source of truth.
 
-The Python side is authoritative because Braket CI expects
-``<package>/_version.py`` to be the single place versions live. The
-Rust side needs the same number in ``Cargo.toml``'s
-``[workspace.package].version`` so that ``cargo build`` and ``maturin
-build`` agree on the wheel metadata. This script copies the value
-across.
+``_version.py`` is authoritative because Braket CI expects
+``<package>/_version.py`` to be the single place versions live.
+``pyproject.toml``'s ``[project].version`` gets the PEP 440 string
+verbatim — maturin publishes it as the distribution version, so it must
+be a static key. ``Cargo.toml``'s ``[workspace.package].version`` gets
+the semver translation.
 
 Usage:
 
-    # Rewrite Cargo.toml to match _version.py (normal developer workflow).
+    # Rewrite pyproject.toml/Cargo.toml to match _version.py.
     python scripts/sync_version.py
 
     # Fail if they're out of sync without rewriting (CI gate).
     python scripts/sync_version.py --check
-
-PEP 440 ↔ Cargo semver translation: PEP 440 allows ``0.1.0.dev0`` /
-``0.1.0a1`` / ``0.1.0rc2`` / ``0.1.0.post1``; Cargo semver requires
-``MAJOR.MINOR.PATCH`` with an optional pre-release tag after a single
-hyphen (``0.1.0-dev0``, ``0.1.0-alpha.1``, ``0.1.0-rc.2``). ``.postN``
-releases are not expressible in semver; they flatten to the bare
-``MAJOR.MINOR.PATCH`` with a Cargo build-metadata suffix
-(``0.1.0+post1``). The mapping is lossless in both directions for the
-forms we actually use.
 """
 
 from __future__ import annotations
@@ -49,14 +40,27 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VERSION_PY = REPO_ROOT / "python" / "qirtoqasm" / "_version.py"
+PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
 CARGO_TOML = REPO_ROOT / "Cargo.toml"
 CARGO_LOCK = REPO_ROOT / "Cargo.lock"
 
 _WORKSPACE_CRATES = ("qirtoqasm-core", "qirtoqasm-ffi", "qirtoqasm-py")
 _VERSION_PY_RE = re.compile(r'^__version__\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
-_CARGO_VERSION_RE = re.compile(
-    r'(?m)^(\[workspace\.package\][^\[]*?^version\s*=\s*)"([^"]+)"',
-)
+
+
+def _section_version_re(section: str) -> re.Pattern[str]:
+    """Match the ``version = "..."`` key inside a given TOML section.
+
+    The ``(?!^\\[)`` lookahead stops the scan at the next section header,
+    so ``[`` inside comments and inline arrays is harmless.
+    """
+    return re.compile(
+        rf'(?m)^(\[{re.escape(section)}\]\n(?:(?!^\[)[\s\S])*?^version\s*=\s*)"([^"]+)"'
+    )
+
+
+_PYPROJECT_VERSION_RE = _section_version_re("project")
+_CARGO_VERSION_RE = _section_version_re("workspace.package")
 
 
 def read_python_version() -> str:
@@ -67,12 +71,34 @@ def read_python_version() -> str:
     return match.group(1)
 
 
-def read_cargo_version() -> str:
-    text = CARGO_TOML.read_text()
-    match = _CARGO_VERSION_RE.search(text)
+def _read_toml_version(path: Path, pattern: re.Pattern[str], what: str) -> str:
+    match = pattern.search(path.read_text())
     if not match:
-        raise SystemExit(f"Could not find [workspace.package].version in {CARGO_TOML}")
+        raise SystemExit(f"Could not find {what} in {path}")
     return match.group(2)
+
+
+def _rewrite_toml_version(
+    path: Path, pattern: re.Pattern[str], what: str, new_version: str
+) -> bool:
+    """Rewrite ``path``'s version to ``new_version``. Return True if changed."""
+    text = path.read_text()
+    match = pattern.search(text)
+    if not match:
+        raise SystemExit(f"Could not find {what} in {path}")
+    if match.group(2) == new_version:
+        return False
+    new_text = text[: match.start()] + match.group(1) + f'"{new_version}"' + text[match.end() :]
+    path.write_text(new_text)
+    return True
+
+
+def read_pyproject_version() -> str:
+    return _read_toml_version(PYPROJECT_TOML, _PYPROJECT_VERSION_RE, "[project].version")
+
+
+def read_cargo_version() -> str:
+    return _read_toml_version(CARGO_TOML, _CARGO_VERSION_RE, "[workspace.package].version")
 
 
 def pep440_to_cargo(pep440: str) -> str:
@@ -118,17 +144,18 @@ def pep440_to_cargo(pep440: str) -> str:
     return cargo
 
 
+def rewrite_pyproject_version(new_version: str) -> bool:
+    """Rewrite ``pyproject.toml`` to ``new_version``. Return True if changed."""
+    return _rewrite_toml_version(
+        PYPROJECT_TOML, _PYPROJECT_VERSION_RE, "[project].version", new_version
+    )
+
+
 def rewrite_cargo_version(new_version: str) -> bool:
     """Rewrite ``Cargo.toml`` to ``new_version``. Return True if changed."""
-    text = CARGO_TOML.read_text()
-    match = _CARGO_VERSION_RE.search(text)
-    if not match:
-        raise SystemExit(f"Could not find [workspace.package].version in {CARGO_TOML}")
-    if match.group(2) == new_version:
-        return False
-    new_text = text[: match.start()] + match.group(1) + f'"{new_version}"' + text[match.end() :]
-    CARGO_TOML.write_text(new_text)
-    return True
+    return _rewrite_toml_version(
+        CARGO_TOML, _CARGO_VERSION_RE, "[workspace.package].version", new_version
+    )
 
 
 def _cargo_lock_entry_re(crate: str) -> re.Pattern[str]:
@@ -175,16 +202,25 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit nonzero if Cargo.toml is out of sync; do not rewrite.",
+        help="Exit nonzero if pyproject.toml or Cargo.toml is out of sync; do not rewrite.",
     )
     args = parser.parse_args()
 
     py_version = read_python_version()
     cargo_expected = pep440_to_cargo(py_version)
+    pyproject_actual = read_pyproject_version()
     cargo_actual = read_cargo_version()
     lock_actual = read_cargo_lock_versions()
 
     if args.check:
+        if pyproject_actual != py_version:
+            print(
+                f"Version mismatch: _version.py says {py_version!r}, "
+                f"pyproject.toml [project].version has {pyproject_actual!r}. "
+                f"Run `python scripts/sync_version.py` to fix.",
+                file=sys.stderr,
+            )
+            return 1
         if cargo_actual != cargo_expected:
             print(
                 f"Version mismatch: _version.py says {py_version!r} "
@@ -206,8 +242,11 @@ def main() -> int:
         print(f"Version sync OK: {py_version} ↔ {cargo_actual}")
         return 0
 
+    pyproject_changed = rewrite_pyproject_version(py_version)
     toml_changed = rewrite_cargo_version(cargo_expected)
     lock_changed = rewrite_cargo_lock(cargo_expected)
+    if pyproject_changed:
+        print(f'Updated pyproject.toml: [project].version = "{py_version}"')
     if toml_changed:
         print(
             f"Updated Cargo.toml: [workspace.package].version = "
@@ -215,8 +254,8 @@ def main() -> int:
         )
     if lock_changed:
         print(f'Updated Cargo.lock: workspace crate versions → "{cargo_expected}"')
-    if not toml_changed and not lock_changed:
-        print(f"Cargo.toml and Cargo.lock already in sync: {cargo_actual}")
+    if not pyproject_changed and not toml_changed and not lock_changed:
+        print(f"pyproject.toml, Cargo.toml and Cargo.lock already in sync: {py_version}")
     return 0
 
 
