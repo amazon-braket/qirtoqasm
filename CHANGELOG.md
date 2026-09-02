@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.0.post0 (2026-09-02)
+
+### Documentation Changes
+
+ * add llms.txt generation
+
 ## v0.1.0 (2026-07-24)
 
 ### Features
@@ -30,4 +36,3 @@
 
  * reject malformed inputs with clean errors
  * Initial commit
-
