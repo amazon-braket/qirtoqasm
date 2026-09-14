@@ -62,6 +62,7 @@ _QIRRUNNER_UNSUPPORTED: dict[str, str] = {
     "cudaq_param_kernel": "qirrunner rejects non-nullary entry points (fixture takes a runtime parameter)",
     # Return-value infrastructure allocates via malloc, which qirrunner does not link in.
     "cudaq_feedforward_with_return": "qirrunner cannot link the malloc-based return-value infrastructure",
+    "cudaq_llvm20_feedforward_with_return": "qirrunner cannot link the malloc-based return-value infrastructure (LLVM 20 indexed-result-readout variant)",
     # These fixtures emit only integer_record_output with no result_record_output calls,
     # so qirrunner reports no measurement data to compare against Braket.
     "qsharp_int_record_output": "qirrunner has no measurement data to report — fixture emits only integer_record_output, not result_record_output",

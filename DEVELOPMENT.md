@@ -32,8 +32,10 @@ sync with `python/qirtoqasm/_version.py` by `scripts/sync_version.py`.
 
 ## Prerequisites
 
-- Rust stable (MSRV 1.75 is pinned by `rust-toolchain.toml` and enforced
-  in CI; contributors can use any newer stable toolchain locally).
+- Rust: `rust-toolchain.toml` pins the toolchain everyone builds with
+  (1.96.0), so rustup selects it automatically. The MSRV is a separate,
+  lower bar — 1.85, declared as `rust-version` in `Cargo.toml` and
+  enforced by the `msrv` CI job.
 - Python ≥ 3.11.
 - `maturin` (for building the Python extension):
   `pip install 'maturin>=1.5,<2.0'`
@@ -213,7 +215,7 @@ All CI lives in `.github/workflows/`:
 
 - **`ci.yml`** — the main pipeline. Runs on pushes to `main` and on
   pull requests. Jobs: `build` (3 OS × 3 py, cargo build/test + tox
-  unit-tests + Codecov), `msrv` (rust 1.75 on Ubuntu), `coverage`
+  unit-tests + Codecov), `msrv` (rust 1.85 on Ubuntu), `coverage`
   (cargo-llvm-cov ≥ 97%), `integ-fixture-parity`, `integ-braket`,
   `integ-qsharp`, `integ-cudaq` (Linux + macOS only), `cpp-smoke`
   and `c-smoke` (each on Ubuntu + macOS + Windows, built via CMake

@@ -409,6 +409,12 @@ pub fn resolve_qubit_operand(
     op: &Operand,
     callee: &str,
 ) -> Result<IndexedIdentifier> {
+    if let Operand::Ssa(key) = op {
+        if let Some(index) = symbols.lookup_ptr_index(key) {
+            symbols.record_qubit(index);
+            return Ok(indexed_ident(QUBIT_REGISTER, index));
+        }
+    }
     match op {
         Operand::PtrConst { index, .. } => {
             symbols.record_qubit(*index);
@@ -432,6 +438,12 @@ pub fn resolve_result_operand(
     op: &Operand,
     callee: &str,
 ) -> Result<IndexedIdentifier> {
+    if let Operand::Ssa(key) = op {
+        if let Some(index) = symbols.lookup_ptr_index(key) {
+            symbols.record_result(index);
+            return Ok(indexed_ident(RESULT_REGISTER, index));
+        }
+    }
     match op {
         Operand::PtrConst { index, .. } => {
             symbols.record_result(*index);
