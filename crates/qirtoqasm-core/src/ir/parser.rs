@@ -1464,44 +1464,32 @@ mod tests {
 
     #[test]
     fn parses_inttoptr_instruction_with_ssa_source_and_opaque_target() {
-        let Instruction::IntToPtr { result, src } =
-            parse_instruction_line("%8 = inttoptr i64 %7 to ptr").unwrap()
-        else {
-            panic!("expected IntToPtr")
-        };
-        assert_eq!(result, "8");
-        let Operand::Ssa(id) = src else {
-            panic!("expected an SSA source")
-        };
-        assert_eq!(id, "7");
+        let i = parse_instruction_line("%8 = inttoptr i64 %7 to ptr").unwrap();
+        assert!(
+            matches!(&i, Instruction::IntToPtr { result, src: Operand::Ssa(id) }
+                     if result == "8" && id == "7"),
+            "{i:?}"
+        );
     }
 
     #[test]
     fn parses_inttoptr_instruction_with_typed_pointer_target() {
-        let Instruction::IntToPtr { result, src } =
-            parse_instruction_line("%3 = inttoptr i64 %2 to %Qubit*").unwrap()
-        else {
-            panic!("expected IntToPtr")
-        };
-        assert_eq!(result, "3");
-        let Operand::Ssa(id) = src else {
-            panic!("expected an SSA source")
-        };
-        assert_eq!(id, "2");
+        let i = parse_instruction_line("%3 = inttoptr i64 %2 to %Qubit*").unwrap();
+        assert!(
+            matches!(&i, Instruction::IntToPtr { result, src: Operand::Ssa(id) }
+                     if result == "3" && id == "2"),
+            "{i:?}"
+        );
     }
 
     #[test]
     fn parses_inttoptr_instruction_with_literal_source() {
-        let Instruction::IntToPtr { result, src } =
-            parse_instruction_line("%1 = inttoptr i64 5 to ptr").unwrap()
-        else {
-            panic!("expected IntToPtr")
-        };
-        assert_eq!(result, "1");
-        let Operand::ConstInt(n) = src else {
-            panic!("expected a constant source")
-        };
-        assert_eq!(n, 5);
+        let i = parse_instruction_line("%1 = inttoptr i64 5 to ptr").unwrap();
+        assert!(
+            matches!(&i, Instruction::IntToPtr { result, src: Operand::ConstInt(n) }
+                     if result == "1" && *n == 5),
+            "{i:?}"
+        );
     }
 
     #[test]

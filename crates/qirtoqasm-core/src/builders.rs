@@ -574,6 +574,21 @@ mod tests {
     }
 
     #[test]
+    fn read_result_on_unbound_pointer_ssa_errors_naming_compile_time_constants() {
+        // An SSA pointer operand with no `inttoptr`-bound index is a
+        // runtime-allocated result, which has no static `c[i]` to name.
+        let mut s = SymbolTable::new();
+        let args = vec![Operand::Ssa("8".to_string())];
+        let b = FunctionBuilder::ReadResult;
+        let signature = sig("__quantum__qis__read_result__body", &["Result"], "i1");
+        let err = lower_call(&b, &signature, &args, Some("cond"), &mut s).unwrap_err();
+        assert!(
+            err.to_string().contains("is not a compile-time constant"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn record_output_noop_drops_call() {
         let mut s = SymbolTable::new();
         let args = vec![result(0), Operand::GetElementPtr];
