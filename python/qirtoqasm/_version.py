@@ -13,19 +13,15 @@
 
 """Single source of truth for the qirtoqasm package version.
 
-This file is the authoritative version declaration for the entire
-repository:
-
-- The Python wheel version (``qirtoqasm.__version__``) reads from here.
-- The Rust workspace version in ``Cargo.toml`` is kept in sync by
-  ``scripts/sync_version.py`` which ``maturin`` invokes before building
-  the wheel (via ``tool.maturin.python-packages`` metadata hooks), and
-  which ``tox -e linters`` enforces as a CI-gated check.
+``qirtoqasm.__version__`` reads from here. ``scripts/sync_version.py``
+propagates this value into ``pyproject.toml``'s ``[project].version``
+(verbatim, and published by maturin) and ``Cargo.toml``'s
+``[workspace.package].version`` (translated to semver, where ``.postN``
+becomes ``+postN`` — legal for Cargo, but never published).
 
 To bump the version, edit ONLY the ``__version__`` string below and run
-``python scripts/sync_version.py``. CI will fail if the two are out of
-sync. Do not edit ``Cargo.toml``'s ``[workspace.package].version``
-directly.
+``python scripts/sync_version.py``. ``tox -e linters`` runs that script
+with ``--check``, so CI fails if the files drift.
 """
 
 __version__ = "0.1.1.dev0"

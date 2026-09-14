@@ -62,7 +62,7 @@ Releasing
 
 1. Edit ``python/qirtoqasm/_version.py`` and bump ``__version__``.
 2. Run ``python scripts/sync_version.py`` to propagate the new version
-   to ``Cargo.toml``.
+   to ``pyproject.toml`` and ``Cargo.toml``.
 3. Run ``tox`` locally to verify the full suite passes.
 4. Commit the version bump and open a pull request.
 5. After merge, draft and publish a GitHub release. The

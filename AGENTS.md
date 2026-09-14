@@ -163,7 +163,7 @@ qirtoqasm/
 ├── python/qirtoqasm/                thin re-export shim + canonical _version.py
 ├── include/qirtoqasm/               C / C++ headers for the FFI
 ├── cmake/                          find_package config + smoke tests
-├── scripts/sync_version.py         propagate _version.py → Cargo.toml
+├── scripts/sync_version.py         propagate _version.py → pyproject.toml + Cargo.toml
 ├── test/
 │   ├── unit_tests/                 pytest against the wheel (no Braket)
 │   └── integ_tests/                fixtures + fixture-parity + e2e (braket / qsharp / cudaq)
@@ -174,8 +174,9 @@ qirtoqasm/
 Top-level config files (`Cargo.toml`, `pyproject.toml`, `tox.ini`,
 `CMakeLists.txt`, `MANIFEST.in`, `rust-toolchain.toml`) live at the
 root. `tox.ini` is the single source of truth for dev + CI commands;
-`scripts/sync_version.py` keeps `Cargo.toml`'s workspace version in
-lock-step with `python/qirtoqasm/_version.py`.
+`scripts/sync_version.py` keeps `pyproject.toml`'s published version and
+`Cargo.toml`'s workspace version in lock-step with
+`python/qirtoqasm/_version.py`.
 
 
 ## Quick-start commands
@@ -245,10 +246,16 @@ cargo llvm-cov --package qirtoqasm-core --summary-only
 ## Version management
 
 **`python/qirtoqasm/_version.py` is the single source of truth.**
-`scripts/sync_version.py` translates the PEP 440 string to a Cargo
-semver form and rewrites `Cargo.toml [workspace.package].version`.
+`scripts/sync_version.py` writes it verbatim to
+`pyproject.toml [project].version` (what maturin publishes) and writes a
+Cargo semver translation to `Cargo.toml [workspace.package].version`.
 Both `tox -e linters` and `tox -e linters-check` run the script with
 `--check`, so drift cannot land.
+
+`[project].version` must stay static. If it is moved back into
+`project.dynamic`, maturin sources it from Cargo instead, and a `.postN`
+release becomes `+postN` — a PEP 440 local version that PyPI rejects
+with a 400.
 
 To bump the version:
 
@@ -259,8 +266,8 @@ vim python/qirtoqasm/_version.py
 # 2. Propagate.
 python scripts/sync_version.py
 
-# 3. Commit both files together.
-git add python/qirtoqasm/_version.py Cargo.toml
+# 3. Commit the files together.
+git add python/qirtoqasm/_version.py pyproject.toml Cargo.toml Cargo.lock
 ```
 
 
@@ -268,8 +275,9 @@ git add python/qirtoqasm/_version.py Cargo.toml
 
 These gates are enforced in CI. Break them and the build will fail.
 
-1. **`python/qirtoqasm/_version.py` and `Cargo.toml` agree.** Run
-   `python scripts/sync_version.py` after editing `_version.py`.
+1. **`python/qirtoqasm/_version.py`, `pyproject.toml` and `Cargo.toml`
+   agree.** Run `python scripts/sync_version.py` after editing
+   `_version.py`.
 2. **Python shim stays thin.** `python/qirtoqasm/__init__.py` is
    re-exports only. New behavior belongs in the Rust core.
 3. **Unit-test coverage is 100%** on the Python shim. Extend tests
