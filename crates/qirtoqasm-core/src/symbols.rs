@@ -29,7 +29,7 @@ pub const RESULT_REGISTER: &str = "c";
 /// it needs to substitute the OpenQASM equivalent for that name. Most
 /// of this struct exists to make that lookup possible.
 ///
-/// Three independent things live here:
+/// Four independent things live here:
 ///
 /// 1. **Quantum register sizing** (`max_qubit_index`,
 ///    `max_result_index`). Qubits and classical result bits are not
@@ -71,6 +71,18 @@ pub const RESULT_REGISTER: &str = "c";
 ///    dereference. Once the `load` resolves, its result is recorded
 ///    in `ssa` like any other classical binding.
 ///
+/// 4. **Pointer-index bindings** (`ptr_index`). A `%Qubit*` /
+///    `%Result*` value is just an integer index wearing a pointer
+///    type, and the index usually arrives as the constant expression
+///    `inttoptr (i64 3 to ptr)` folded at parse time. Some lowerings
+///    instead route the index through a stack slot and materialize
+///    the pointer with a standalone `inttoptr` instruction over the
+///    loaded value. This map holds the index those pointers denote,
+///    so a later gate or readout operand naming the SSA still
+///    resolves to a static `q[i]` / `c[i]`. It is deliberately
+///    separate from `ssa`: a classical integer that merely happens to
+///    be bound must never be reinterpreted as a qubit address.
+///
 /// One thing the table deliberately does **not** track is "function
 /// input parameters". The QIR Base and Adaptive Profiles both define
 /// the entry point as `@main()` with no parameters, so every
@@ -95,6 +107,12 @@ pub struct SymbolTable {
     /// (alloca-root SSA, offset) → most recently stored value. Written
     /// by `store`, read by `load`.
     alloca_slot: HashMap<(String, u64), Operand>,
+    /// SSA → qubit/result index for pointers materialized by an
+    /// `inttoptr` instruction. Kept separate from `ssa` so a classical
+    /// integer binding is never mistaken for a pointer index: only
+    /// `inttoptr` writes here, and only the qubit/result operand
+    /// resolvers read it.
+    ptr_index: HashMap<String, i64>,
 }
 
 impl SymbolTable {
@@ -107,6 +125,7 @@ impl SymbolTable {
             ssa: HashMap::new(),
             alloca_alias: HashMap::new(),
             alloca_slot: HashMap::new(),
+            ptr_index: HashMap::new(),
         }
     }
 
@@ -176,6 +195,17 @@ impl SymbolTable {
         let (root, offset) = self.alloca_alias.get(ptr)?.clone();
         let value = self.alloca_slot.get(&(root, offset))?;
         operand_to_expression(value)
+    }
+
+    /// Record that the pointer SSA `key` denotes qubit/result `index`.
+    pub fn record_ptr_index(&mut self, key: &str, index: i64) {
+        self.ptr_index.insert(key.to_string(), index);
+    }
+
+    /// Return the qubit/result index a pointer SSA denotes, if it was
+    /// materialized by an `inttoptr` over a constant-folded integer.
+    pub fn lookup_ptr_index(&self, key: &str) -> Option<i64> {
+        self.ptr_index.get(key).copied()
     }
 }
 
@@ -315,5 +345,29 @@ mod more_tests {
         // Degenerate input — falls through to the text fallback.
         let out = ssa_key("", "% bad");
         assert_eq!(out, "% bad");
+    }
+
+    #[test]
+    fn record_and_lookup_ptr_index_round_trip() {
+        let mut s = SymbolTable::new();
+        s.record_ptr_index("8", 3);
+        assert_eq!(s.lookup_ptr_index("8"), Some(3));
+    }
+
+    #[test]
+    fn lookup_ptr_index_returns_none_for_unbound_key() {
+        let s = SymbolTable::new();
+        assert_eq!(s.lookup_ptr_index("8"), None);
+    }
+
+    #[test]
+    fn ptr_index_and_ssa_bindings_stay_independent() {
+        // A classical integer bound under a key must not be readable as
+        // a pointer index, and vice versa.
+        let mut s = SymbolTable::new();
+        s.record_ssa("7", Expression::Integer(9));
+        assert_eq!(s.lookup_ptr_index("7"), None);
+        s.record_ptr_index("8", 1);
+        assert!(s.lookup_ssa("8").is_err());
     }
 }

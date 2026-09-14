@@ -279,7 +279,7 @@ These gates are enforced in CI. Break them and the build will fail.
 5. **Fixture-parity checks are byte-exact.** Changing emitter output that
    shifts any fixture is a deliberate regression; update the printer,
    not the fixture.
-6. **MSRV is Rust 1.75.** Declared in `Cargo.toml`
+6. **MSRV is Rust 1.85.** Declared in `Cargo.toml`
    `[workspace.package].rust-version` and enforced by the `msrv` CI
    job.
 7. **No Braket / Q# / CUDA-Q imports in the unit tier.** The build
@@ -410,6 +410,12 @@ lands in the repo. Reviewers apply them by hand.
   eagerly-bound scalar values stashed in a local buffer fold back to
   numeric literals at gate-argument use sites, so `rx(angles[0], q[0])`
   with `angles=[0.1, 0.2]` emits `rx(0.1) q[0];`.
+- **`inttoptr` in instruction position** (`%p = inttoptr i64 %i to
+  ptr`), in addition to the `inttoptr (i64 N to ptr)`
+  constant-expression form. The integer source resolves to a static
+  qubit / result index either directly from a literal or through the
+  stack-slot folding above, which covers the lowering that routes
+  result indices via an `[N x i64]` array before reading them back.
 
 ### Out of scope — must produce a clear error
 
@@ -511,7 +517,7 @@ All CI lives under `.github/workflows/`:
 - **`ci.yml`** — main pipeline on pushes to `main` and PRs. Jobs:
   - `build` — cargo build/test + lint + `tox -e unit-tests` +
     `tox -e integ-fixture-parity`, 3 OS × 3 Py matrix. No Braket.
-  - `msrv` — Rust 1.75 build + test on Ubuntu.
+  - `msrv` — Rust 1.85 build + test on Ubuntu.
   - `coverage` — `cargo llvm-cov` ≥ 97% on `qirtoqasm-core`.
   - `integ-braket` — all three OSes × 3 Py.
   - `integ-qsharp` — all three OSes × 3 Py.
@@ -629,11 +635,13 @@ macOS with undefined Python symbols. Build the extension via
 `maturin develop` or `maturin build`. Plain `cargo build` works
 because it uses `default-members`.
 
-### `rust-toolchain.toml` pins `1.82.0`
+### `rust-toolchain.toml` pins `1.96.0`
 
 Pinned (not rolling `stable`) so that dev machines, cibuildwheel, and
 CI agree on lint output. Bumping it is a deliberate change that may
-need to absorb new clippy / rustfmt findings.
+need to absorb new clippy / rustfmt findings. This is the toolchain
+everyone builds with day to day; it is independent of the MSRV in
+`Cargo.toml`, which the `msrv` CI job checks separately.
 
 ### Python shim coverage is literal 100%
 

@@ -366,6 +366,10 @@ impl Exporter {
                     let expr = symbols.lookup_ssa(src)?;
                     symbols.record_ssa(result, expr);
                 }
+                Instruction::IntToPtr { result, src } => {
+                    let index = resolve_ptr_index_operand(symbols, src)?;
+                    symbols.record_ptr_index(result, index);
+                }
                 Instruction::Unsupported { opcode } => {
                     return Err(QirToQasmError::unsupported(format!(
                         "unsupported LLVM instruction opcode {:?} in block {:?}",
@@ -381,6 +385,43 @@ impl Exporter {
             targets,
         })
     }
+}
+
+/// Resolve the integer operand of an `inttoptr` to the qubit/result
+/// index the resulting pointer denotes.
+///
+/// A literal source resolves directly. An SSA source resolves only if
+/// upstream folding already bound it to an integer constant — the
+/// `alloca` / `store` / `getelementptr` / `load` scratch-slot idiom
+/// binds exactly that. Anything else is a genuinely dynamic address,
+/// which has no OpenQASM 3 equivalent because register indices must be
+/// static.
+fn resolve_ptr_index_operand(symbols: &SymbolTable, src: &Operand) -> Result<i64> {
+    let index = match src {
+        Operand::ConstInt(n) => i64::try_from(*n).map_err(|_| {
+            QirToQasmError::unsupported(format!("inttoptr index {n} does not fit in i64"))
+        })?,
+        Operand::Ssa(key) => match symbols.lookup_ssa(key) {
+            Ok(Expression::Integer(n)) => n,
+            _ => {
+                return Err(QirToQasmError::unsupported(format!(
+                    "inttoptr source {key:?} is not a compile-time constant; \
+                     qubit and result indices must be statically known"
+                )))
+            }
+        },
+        _ => {
+            return Err(QirToQasmError::unsupported(
+                "inttoptr expects an integer source operand".to_string(),
+            ))
+        }
+    };
+    if index < 0 {
+        return Err(QirToQasmError::unsupported(format!(
+            "inttoptr index {index} is negative; qubit and result indices must be non-negative"
+        )));
+    }
+    Ok(index)
 }
 
 /// Lower a `phi i32`/`phi i64` if-merge into an `int` variable
@@ -1120,6 +1161,11 @@ mod new_lowering_tests {
     //! exercise the same code but go through the PyO3 wheel;
     //! `cargo llvm-cov` only counts Rust-level coverage.
 
+    use super::resolve_ptr_index_operand;
+    use crate::ir::Operand;
+    use crate::oq3::ast::Expression;
+    use crate::symbols::SymbolTable;
+
     fn translate(ll: &str) -> crate::Result<String> {
         crate::translate(ll, &crate::TranslateOptions::default())
     }
@@ -1176,6 +1222,154 @@ attributes #1 = { "irreversible" }
 "#;
         let err = translate(ll).unwrap_err();
         assert!(err.to_string().contains("SSA value"), "{err}");
+    }
+
+    #[test]
+    fn inttoptr_over_stack_slot_index_resolves_result_readouts() {
+        // The index array is written with constants, read back through
+        // `load`, and turned into `%Result*` values by `inttoptr`.
+        let ll = r#"
+define { ptr, i64 } @main() #0 {
+  call void @__quantum__qis__h__body(ptr null)
+  call void @__quantum__qis__mz__body(ptr null, ptr null)
+  %1 = call i1 @__quantum__qis__read_result__body(ptr null)
+  br i1 %1, label %2, label %3
+
+2:
+  call void @__quantum__qis__x__body(ptr inttoptr (i64 1 to ptr))
+  br label %3
+
+3:
+  call void @__quantum__qis__mz__body(ptr inttoptr (i64 1 to ptr), ptr inttoptr (i64 1 to ptr))
+  %4 = alloca [2 x i64], align 8
+  store i64 0, ptr %4, align 8
+  %5 = getelementptr [2 x i64], ptr %4, i32 0, i32 1
+  store i64 1, ptr %5, align 8
+  %7 = load i64, ptr %4, align 8
+  %8 = inttoptr i64 %7 to ptr
+  %9 = call i1 @__quantum__qis__read_result__body(ptr %8)
+  %11 = load i64, ptr %5, align 8
+  %12 = inttoptr i64 %11 to ptr
+  %13 = call i1 @__quantum__qis__read_result__body(ptr %12)
+  ret { ptr, i64 } undef
+}
+declare void @__quantum__qis__h__body(ptr)
+declare void @__quantum__qis__x__body(ptr)
+declare void @__quantum__qis__mz__body(ptr, ptr) #1
+declare i1 @__quantum__qis__read_result__body(ptr)
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="2" "requiredResults"="2" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(ll).unwrap();
+        assert!(qasm.contains("qubit[2] q;"), "\n{qasm}");
+        assert!(qasm.contains("bit[2] c;"), "\n{qasm}");
+        assert!(qasm.contains("h q[0];"), "\n{qasm}");
+        assert!(qasm.contains("c[0] = measure q[0];"), "\n{qasm}");
+        assert!(qasm.contains("x q[1];"), "\n{qasm}");
+        assert!(qasm.contains("c[1] = measure q[1];"), "\n{qasm}");
+    }
+
+    #[test]
+    fn inttoptr_over_stack_slot_index_resolves_gate_qubit_operands() {
+        // The same pointer materialization on the qubit side: the gate
+        // target arrives as an `inttoptr` of a loaded index.
+        let ll = r#"
+define void @main() #0 {
+  %1 = alloca [2 x i64], align 8
+  store i64 1, ptr %1, align 8
+  %2 = load i64, ptr %1, align 8
+  %3 = inttoptr i64 %2 to ptr
+  call void @__quantum__qis__h__body(ptr %3)
+  call void @__quantum__qis__mz__body(ptr %3, ptr inttoptr (i64 1 to ptr))
+  ret void
+}
+declare void @__quantum__qis__h__body(ptr)
+declare void @__quantum__qis__mz__body(ptr, ptr) #1
+attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="2" "requiredResults"="2" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(ll).unwrap();
+        assert!(qasm.contains("qubit[2] q;"), "\n{qasm}");
+        assert!(qasm.contains("h q[1];"), "\n{qasm}");
+        assert!(qasm.contains("c[1] = measure q[1];"), "\n{qasm}");
+    }
+
+    #[test]
+    fn inttoptr_with_literal_source_resolves_without_a_stack_slot() {
+        let ll = r#"
+define void @main() #0 {
+  %1 = inttoptr i64 1 to ptr
+  call void @__quantum__qis__h__body(ptr %1)
+  call void @__quantum__qis__mz__body(ptr %1, ptr inttoptr (i64 1 to ptr))
+  ret void
+}
+declare void @__quantum__qis__h__body(ptr)
+declare void @__quantum__qis__mz__body(ptr, ptr) #1
+attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="2" "requiredResults"="2" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(ll).unwrap();
+        assert!(qasm.contains("h q[1];"), "\n{qasm}");
+    }
+
+    #[test]
+    fn resolve_ptr_index_operand_rejects_negative_literal() {
+        let symbols = SymbolTable::new();
+        let err = resolve_ptr_index_operand(&symbols, &Operand::ConstInt(-1)).unwrap_err();
+        assert!(err.to_string().contains("is negative"), "{err}");
+    }
+
+    #[test]
+    fn resolve_ptr_index_operand_rejects_literal_wider_than_i64() {
+        let symbols = SymbolTable::new();
+        let too_big = Operand::ConstInt(i128::from(i64::MAX) + 1);
+        let err = resolve_ptr_index_operand(&symbols, &too_big).unwrap_err();
+        assert!(err.to_string().contains("does not fit in i64"), "{err}");
+    }
+
+    #[test]
+    fn resolve_ptr_index_operand_rejects_non_integer_operand() {
+        let symbols = SymbolTable::new();
+        let err = resolve_ptr_index_operand(&symbols, &Operand::ConstFloat(1.0)).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("expects an integer source operand"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resolve_ptr_index_operand_rejects_ssa_bound_to_a_non_integer() {
+        let mut symbols = SymbolTable::new();
+        symbols.record_ssa("7", Expression::Float(0.5));
+        let err = resolve_ptr_index_operand(&symbols, &Operand::Ssa("7".to_string())).unwrap_err();
+        assert!(
+            err.to_string().contains("is not a compile-time constant"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn inttoptr_over_unbound_source_errors_naming_compile_time_constants() {
+        // No `store` reaches the slot, so the loaded index never folds.
+        let ll = r#"
+define void @main(ptr %external) #0 {
+  %1 = load i64, ptr %external, align 8
+  %2 = inttoptr i64 %1 to ptr
+  call void @__quantum__qis__h__body(ptr %2)
+  call void @__quantum__qis__mz__body(ptr null, ptr null)
+  ret void
+}
+declare void @__quantum__qis__h__body(ptr)
+declare void @__quantum__qis__mz__body(ptr, ptr) #1
+attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="1" "requiredResults"="1" }
+attributes #1 = { "irreversible" }
+"#;
+        let err = translate(ll).unwrap_err();
+        assert!(
+            err.to_string().contains("is not a compile-time constant"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

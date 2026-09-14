@@ -194,6 +194,21 @@ pub enum Instruction {
         /// Source SSA id (must already be bound).
         src: String,
     },
+    /// `%result = inttoptr iN <src> to <ptr>` in instruction position,
+    /// as opposed to the `inttoptr (iN N to <ptr>)` constant-expression
+    /// form that [`Operand::PtrConst`] already covers.
+    ///
+    /// The pointer a `%Qubit*` / `%Result*` operand denotes is just an
+    /// integer index, so an `inttoptr` whose source folds to a constant
+    /// names a static qubit or result. `src` is the integer operand:
+    /// either a literal or an SSA id bound to a constant by upstream
+    /// folding.
+    IntToPtr {
+        /// SSA id assigned by the inttoptr.
+        result: String,
+        /// Integer source operand.
+        src: Operand,
+    },
     /// Any other opcode that made it into a `define` body. Triggers
     /// an unsupported-construct error during translation.
     Unsupported {
