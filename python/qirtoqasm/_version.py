@@ -24,4 +24,4 @@ To bump the version, edit ONLY the ``__version__`` string below and run
 with ``--check``, so CI fails if the files drift.
 """
 
-__version__ = "0.1.1.dev0"
+__version__ = "0.2.0"

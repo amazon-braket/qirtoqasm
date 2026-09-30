@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "qirtoqasm"
 # Kept in sync with python/qirtoqasm/_version.py by scripts/sync_version.py.
-version = "0.1.1.dev0"
+version = "0.2.0"
 description = "Translate QIR (Quantum Intermediate Representation) to Braket-compatible OpenQASM 3.0."
 readme = "README.md"
 requires-python = ">=3.11"

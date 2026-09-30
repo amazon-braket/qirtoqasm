@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.0 (2026-09-30)
+
+### Features
+
+ * inttoptr and cudaq v0.16 support
+
 ## v0.1.0.post0 (2026-09-02)
 
 ### Documentation Changes
