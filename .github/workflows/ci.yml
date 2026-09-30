@@ -2,7 +2,7 @@
 #
 # build     — cargo build/test, lint, tox unit-tests. No Braket / Q# /
 #             CUDA-Q. 3 OS × 3 Py.
-# msrv      — rust 1.75 build + test on Ubuntu.
+# msrv      — rust 1.85 build + test on Ubuntu.
 #
 # integ-* (braket / qsharp / cudaq / fixture-parity) and the C/C++ smoke jobs
 # land alongside the code they exercise.
@@ -95,6 +95,12 @@ jobs:
   msrv:
     name: MSRV (rust 1.85)
     runs-on: ubuntu-latest
+    env:
+      # rust-toolchain.toml pins the day-to-day toolchain and takes
+      # precedence over `rustup default`, so without this override
+      # cargo would silently build with the pinned toolchain instead
+      # of the MSRV.
+      RUSTUP_TOOLCHAIN: "1.85"
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
