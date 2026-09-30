@@ -126,7 +126,8 @@ You can pass pytest arguments through tox with `--`, e.g.
 1. If your change bumps the version, edit **only**
    `python/qirtoqasm/_version.py` and run
    `python scripts/sync_version.py` to propagate the new version to
-   `Cargo.toml`. The `tox -e linters` env enforces this.
+   `pyproject.toml` and `Cargo.toml`. The `tox -e linters` env enforces
+   this.
 
 
 ### Commit Your Change
