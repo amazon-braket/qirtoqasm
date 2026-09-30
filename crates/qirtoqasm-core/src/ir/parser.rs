@@ -548,6 +548,7 @@ fn parse_instruction_line(line: &str) -> Result<Instruction> {
                 opcode: opcode.to_string(),
             })
         }
+        "inttoptr" => parse_inttoptr_instruction(result, args),
         _ if opcode.is_empty() => Err(QirToQasmError::syntax(format!(
             "empty instruction in block body: {line:?}"
         ))),
@@ -1222,6 +1223,27 @@ fn parse_zext(result: Option<String>, args: &str) -> Option<Instruction> {
     Some(Instruction::Zext { result, src })
 }
 
+/// Parse an `inttoptr` in instruction position:
+/// `%result = inttoptr iN <src> to <ptr>`, where `<ptr>` is either the
+/// opaque `ptr` or a typed `%Qubit*` / `%Result*`.
+///
+/// The constant-expression form `inttoptr (iN N to <ptr>)` is handled by
+/// [`parse_operand`] instead, which folds it straight into an
+/// [`Operand::PtrConst`]. Here the source may be a literal or an SSA id,
+/// so the integer operand is preserved verbatim and resolved during
+/// translation once upstream bindings are known.
+fn parse_inttoptr_instruction(result: Option<String>, args: &str) -> Result<Instruction> {
+    let result = result.ok_or_else(|| {
+        QirToQasmError::syntax("inttoptr without SSA result assignment".to_string())
+    })?;
+    let rest = args.trim();
+    let to_idx = find_top_level_keyword(rest, " to ").ok_or_else(|| {
+        QirToQasmError::syntax(format!("inttoptr without a `to` clause: {args:?}"))
+    })?;
+    let src = parse_operand(rest[..to_idx].trim())?;
+    Ok(Instruction::IntToPtr { result, src })
+}
+
 // ---------------------------------------------------------------------------
 // alloca / bitcast / getelementptr / load / store — minimal recognizers
 // for the array-of-scratch idiom (alloca an array, store constants,
@@ -1437,6 +1459,54 @@ mod tests {
         assert!(
             matches!(i, Instruction::GetElementPtrOffset { .. }),
             "{i:?}"
+        );
+    }
+
+    #[test]
+    fn parses_inttoptr_instruction_with_ssa_source_and_opaque_target() {
+        let i = parse_instruction_line("%8 = inttoptr i64 %7 to ptr").unwrap();
+        assert!(
+            matches!(&i, Instruction::IntToPtr { result, src: Operand::Ssa(id) }
+                     if result == "8" && id == "7"),
+            "{i:?}"
+        );
+    }
+
+    #[test]
+    fn parses_inttoptr_instruction_with_typed_pointer_target() {
+        let i = parse_instruction_line("%3 = inttoptr i64 %2 to %Qubit*").unwrap();
+        assert!(
+            matches!(&i, Instruction::IntToPtr { result, src: Operand::Ssa(id) }
+                     if result == "3" && id == "2"),
+            "{i:?}"
+        );
+    }
+
+    #[test]
+    fn parses_inttoptr_instruction_with_literal_source() {
+        let i = parse_instruction_line("%1 = inttoptr i64 5 to ptr").unwrap();
+        assert!(
+            matches!(&i, Instruction::IntToPtr { result, src: Operand::ConstInt(n) }
+                     if result == "1" && *n == 5),
+            "{i:?}"
+        );
+    }
+
+    #[test]
+    fn inttoptr_instruction_without_result_errors_naming_the_opcode() {
+        let err = parse_instruction_line("inttoptr i64 %7 to ptr").unwrap_err();
+        assert!(
+            err.to_string().contains("inttoptr without SSA result"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn inttoptr_instruction_without_to_clause_errors_naming_the_clause() {
+        let err = parse_instruction_line("%8 = inttoptr i64 %7").unwrap_err();
+        assert!(
+            err.to_string().contains("without a `to` clause"),
+            "unexpected error: {err}"
         );
     }
 

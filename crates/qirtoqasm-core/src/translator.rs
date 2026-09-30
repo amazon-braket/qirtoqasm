@@ -366,6 +366,10 @@ impl Exporter {
                     let expr = symbols.lookup_ssa(src)?;
                     symbols.record_ssa(result, expr);
                 }
+                Instruction::IntToPtr { result, src } => {
+                    let index = resolve_ptr_index_operand(symbols, src)?;
+                    symbols.record_ptr_index(result, index);
+                }
                 Instruction::Unsupported { opcode } => {
                     return Err(QirToQasmError::unsupported(format!(
                         "unsupported LLVM instruction opcode {:?} in block {:?}",
@@ -381,6 +385,43 @@ impl Exporter {
             targets,
         })
     }
+}
+
+/// Resolve the integer operand of an `inttoptr` to the qubit/result
+/// index the resulting pointer denotes.
+///
+/// A literal source resolves directly. An SSA source resolves only if
+/// upstream folding already bound it to an integer constant — the
+/// `alloca` / `store` / `getelementptr` / `load` scratch-slot idiom
+/// binds exactly that. Anything else is a genuinely dynamic address,
+/// which has no OpenQASM 3 equivalent because register indices must be
+/// static.
+fn resolve_ptr_index_operand(symbols: &SymbolTable, src: &Operand) -> Result<i64> {
+    let index = match src {
+        Operand::ConstInt(n) => i64::try_from(*n).map_err(|_| {
+            QirToQasmError::unsupported(format!("inttoptr index {n} does not fit in i64"))
+        })?,
+        Operand::Ssa(key) => match symbols.lookup_ssa(key) {
+            Ok(Expression::Integer(n)) => n,
+            _ => {
+                return Err(QirToQasmError::unsupported(format!(
+                    "inttoptr source {key:?} is not a compile-time constant; \
+                     qubit and result indices must be statically known"
+                )))
+            }
+        },
+        _ => {
+            return Err(QirToQasmError::unsupported(
+                "inttoptr expects an integer source operand".to_string(),
+            ))
+        }
+    };
+    if index < 0 {
+        return Err(QirToQasmError::unsupported(format!(
+            "inttoptr index {index} is negative; qubit and result indices must be non-negative"
+        )));
+    }
+    Ok(index)
 }
 
 /// Lower a `phi i32`/`phi i64` if-merge into an `int` variable
@@ -900,14 +941,14 @@ mod new_lowering_dispatch {
     use super::*;
     use crate::ir::parser::parse_module;
 
-    fn translate(ll: &str) -> String {
-        let module = parse_module(ll).unwrap();
+    fn translate(qir: &str) -> String {
+        let module = parse_module(qir).unwrap();
         Exporter::new().dumps(&module).unwrap()
     }
 
     #[test]
     fn and_i1_flows_into_if_condition() {
-        let ll = "\
+        let qir = "\
 %Qubit = type opaque
 %Result = type opaque
 
@@ -936,13 +977,13 @@ declare i1 @__quantum__qis__read_result__body(%Result*)
 attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"3\" \"requiredResults\"=\"3\" }
 attributes #1 = { \"irreversible\" }
 ";
-        let out = translate(ll);
+        let out = translate(qir);
         assert!(out.contains("if (c[0] == 1 && c[1] == 1)"), "{out}");
     }
 
     #[test]
     fn or_i1_flows_into_if_condition() {
-        let ll = "\
+        let qir = "\
 %Qubit = type opaque
 %Result = type opaque
 
@@ -971,7 +1012,7 @@ declare i1 @__quantum__qis__read_result__body(%Result*)
 attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"3\" \"requiredResults\"=\"3\" }
 attributes #1 = { \"irreversible\" }
 ";
-        let out = translate(ll);
+        let out = translate(qir);
         assert!(out.contains("if (c[0] == 1 || c[1] == 1)"), "{out}");
     }
 
@@ -979,7 +1020,7 @@ attributes #1 = { \"irreversible\" }
     fn select_i1_flows_into_if_condition() {
         // Emits the compiler short-circuit shape `select i1 %a, i1 %b, i1 false`
         // (`a && b`), which the lowering recognizes and reduces to `a && b`.
-        let ll = "\
+        let qir = "\
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1008,7 +1049,7 @@ declare i1 @__quantum__qis__read_result__body(%Result*)
 attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"3\" \"requiredResults\"=\"3\" }
 attributes #1 = { \"irreversible\" }
 ";
-        let out = translate(ll);
+        let out = translate(qir);
         assert!(out.contains("if (c[0] == 1 && c[1] == 1)"), "{out}");
     }
 
@@ -1018,7 +1059,7 @@ attributes #1 = { \"irreversible\" }
         // predicate. The `add` result is inlined into the comparison, so
         // the emitted OpenQASM should contain a `... + 1 < ...` expression
         // inside the `if` condition.
-        let ll = "\
+        let qir = "\
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1045,7 +1086,7 @@ declare i1 @__quantum__qis__read_result__body(%Result*)
 attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"2\" \"requiredResults\"=\"2\" }
 attributes #1 = { \"irreversible\" }
 ";
-        let out = translate(ll);
+        let out = translate(qir);
         assert!(out.contains("if (0 + 1 < 3)"), "{out}");
     }
 
@@ -1054,7 +1095,7 @@ attributes #1 = { \"irreversible\" }
         // A variadic callee with no registered builder is rejected with
         // an error naming the callee and mentioning the variadic-multi-
         // controlled idiom that motivates the check.
-        let ll = "\
+        let qir = "\
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1070,7 +1111,7 @@ declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
 attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"1\" \"requiredResults\"=\"1\" }
 attributes #1 = { \"irreversible\" }
 ";
-        let err = parse_module(ll)
+        let err = parse_module(qir)
             .and_then(|m| Exporter::new().dumps(&m))
             .unwrap_err();
         assert!(err.to_string().contains("someUnknownVariadic"));
@@ -1081,7 +1122,7 @@ attributes #1 = { \"irreversible\" }
 
     #[test]
     fn nested_select_i1_true_false_folds_to_bare_predicate() {
-        let ll = "\
+        let qir = "\
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1108,7 +1149,7 @@ declare i1 @__quantum__rt__read_result(%Result*)
 attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"2\" \"requiredResults\"=\"1\" }
 attributes #1 = { \"irreversible\" }
 ";
-        let out = translate(ll);
+        let out = translate(qir);
         assert!(out.contains("if (c[0] == 1) {\n  x q[1];\n}"), "{out}");
     }
 }
@@ -1120,13 +1161,15 @@ mod new_lowering_tests {
     //! exercise the same code but go through the PyO3 wheel;
     //! `cargo llvm-cov` only counts Rust-level coverage.
 
-    fn translate(ll: &str) -> crate::Result<String> {
-        crate::translate(ll, &crate::TranslateOptions::default())
+    use super::*;
+
+    fn translate(qir: &str) -> crate::Result<String> {
+        crate::translate(qir, &crate::TranslateOptions::default())
     }
 
     #[test]
     fn alloca_store_load_folds_scalar_constant() {
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1149,7 +1192,7 @@ declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
 attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="1" "requiredResults"="1" }
 attributes #1 = { "irreversible" }
 "#;
-        let qasm = translate(ll).unwrap();
+        let qasm = translate(qir).unwrap();
         assert!(qasm.contains("rx(0.5)"), "\n{qasm}");
         assert!(qasm.contains("ry(0.25)"), "\n{qasm}");
     }
@@ -1159,7 +1202,7 @@ attributes #1 = { "irreversible" }
         // Load from a pointer that was never alloca'd or stored into.
         // The load SSA stays unbound; downstream use fails with the
         // "SSA value … is used but was never bound" error.
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1174,13 +1217,161 @@ declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
 attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="1" "requiredResults"="1" }
 attributes #1 = { "irreversible" }
 "#;
-        let err = translate(ll).unwrap_err();
+        let err = translate(qir).unwrap_err();
         assert!(err.to_string().contains("SSA value"), "{err}");
     }
 
     #[test]
+    fn inttoptr_over_stack_slot_index_resolves_result_readouts() {
+        // The index array is written with constants, read back through
+        // `load`, and turned into `%Result*` values by `inttoptr`.
+        let qir = r#"
+define { ptr, i64 } @main() #0 {
+  call void @__quantum__qis__h__body(ptr null)
+  call void @__quantum__qis__mz__body(ptr null, ptr null)
+  %1 = call i1 @__quantum__qis__read_result__body(ptr null)
+  br i1 %1, label %2, label %3
+
+2:
+  call void @__quantum__qis__x__body(ptr inttoptr (i64 1 to ptr))
+  br label %3
+
+3:
+  call void @__quantum__qis__mz__body(ptr inttoptr (i64 1 to ptr), ptr inttoptr (i64 1 to ptr))
+  %4 = alloca [2 x i64], align 8
+  store i64 0, ptr %4, align 8
+  %5 = getelementptr [2 x i64], ptr %4, i32 0, i32 1
+  store i64 1, ptr %5, align 8
+  %7 = load i64, ptr %4, align 8
+  %8 = inttoptr i64 %7 to ptr
+  %9 = call i1 @__quantum__qis__read_result__body(ptr %8)
+  %11 = load i64, ptr %5, align 8
+  %12 = inttoptr i64 %11 to ptr
+  %13 = call i1 @__quantum__qis__read_result__body(ptr %12)
+  ret { ptr, i64 } undef
+}
+declare void @__quantum__qis__h__body(ptr)
+declare void @__quantum__qis__x__body(ptr)
+declare void @__quantum__qis__mz__body(ptr, ptr) #1
+declare i1 @__quantum__qis__read_result__body(ptr)
+attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="2" "requiredResults"="2" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(qir).unwrap();
+        assert!(qasm.contains("qubit[2] q;"), "\n{qasm}");
+        assert!(qasm.contains("bit[2] c;"), "\n{qasm}");
+        assert!(qasm.contains("h q[0];"), "\n{qasm}");
+        assert!(qasm.contains("c[0] = measure q[0];"), "\n{qasm}");
+        assert!(qasm.contains("x q[1];"), "\n{qasm}");
+        assert!(qasm.contains("c[1] = measure q[1];"), "\n{qasm}");
+    }
+
+    #[test]
+    fn inttoptr_over_stack_slot_index_resolves_gate_qubit_operands() {
+        // The same pointer materialization on the qubit side: the gate
+        // target arrives as an `inttoptr` of a loaded index.
+        let qir = r#"
+define void @main() #0 {
+  %1 = alloca [2 x i64], align 8
+  store i64 1, ptr %1, align 8
+  %2 = load i64, ptr %1, align 8
+  %3 = inttoptr i64 %2 to ptr
+  call void @__quantum__qis__h__body(ptr %3)
+  call void @__quantum__qis__mz__body(ptr %3, ptr inttoptr (i64 1 to ptr))
+  ret void
+}
+declare void @__quantum__qis__h__body(ptr)
+declare void @__quantum__qis__mz__body(ptr, ptr) #1
+attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="2" "requiredResults"="2" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(qir).unwrap();
+        assert!(qasm.contains("qubit[2] q;"), "\n{qasm}");
+        assert!(qasm.contains("h q[1];"), "\n{qasm}");
+        assert!(qasm.contains("c[1] = measure q[1];"), "\n{qasm}");
+    }
+
+    #[test]
+    fn inttoptr_with_literal_source_resolves_without_a_stack_slot() {
+        let qir = r#"
+define void @main() #0 {
+  %1 = inttoptr i64 1 to ptr
+  call void @__quantum__qis__h__body(ptr %1)
+  call void @__quantum__qis__mz__body(ptr %1, ptr inttoptr (i64 1 to ptr))
+  ret void
+}
+declare void @__quantum__qis__h__body(ptr)
+declare void @__quantum__qis__mz__body(ptr, ptr) #1
+attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="2" "requiredResults"="2" }
+attributes #1 = { "irreversible" }
+"#;
+        let qasm = translate(qir).unwrap();
+        assert!(qasm.contains("h q[1];"), "\n{qasm}");
+    }
+
+    #[test]
+    fn resolve_ptr_index_operand_rejects_negative_literal() {
+        let symbols = SymbolTable::new();
+        let err = resolve_ptr_index_operand(&symbols, &Operand::ConstInt(-1)).unwrap_err();
+        assert!(err.to_string().contains("is negative"), "{err}");
+    }
+
+    #[test]
+    fn resolve_ptr_index_operand_rejects_literal_wider_than_i64() {
+        let symbols = SymbolTable::new();
+        let too_big = Operand::ConstInt(i128::from(i64::MAX) + 1);
+        let err = resolve_ptr_index_operand(&symbols, &too_big).unwrap_err();
+        assert!(err.to_string().contains("does not fit in i64"), "{err}");
+    }
+
+    #[test]
+    fn resolve_ptr_index_operand_rejects_non_integer_operand() {
+        let symbols = SymbolTable::new();
+        let err = resolve_ptr_index_operand(&symbols, &Operand::ConstFloat(1.0)).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("expects an integer source operand"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resolve_ptr_index_operand_rejects_ssa_bound_to_a_non_integer() {
+        let mut symbols = SymbolTable::new();
+        symbols.record_ssa("7", Expression::Float(0.5));
+        let err = resolve_ptr_index_operand(&symbols, &Operand::Ssa("7".to_string())).unwrap_err();
+        assert!(
+            err.to_string().contains("is not a compile-time constant"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn inttoptr_over_unbound_source_errors_naming_compile_time_constants() {
+        // No `store` reaches the slot, so the loaded index never folds.
+        let qir = r#"
+define void @main(ptr %external) #0 {
+  %1 = load i64, ptr %external, align 8
+  %2 = inttoptr i64 %1 to ptr
+  call void @__quantum__qis__h__body(ptr %2)
+  call void @__quantum__qis__mz__body(ptr null, ptr null)
+  ret void
+}
+declare void @__quantum__qis__h__body(ptr)
+declare void @__quantum__qis__mz__body(ptr, ptr) #1
+attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="1" "requiredResults"="1" }
+attributes #1 = { "irreversible" }
+"#;
+        let err = translate(qir).unwrap_err();
+        assert!(
+            err.to_string().contains("is not a compile-time constant"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn struct_by_value_param_parses() {
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1194,13 +1385,13 @@ declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
 attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="1" "requiredResults"="1" }
 attributes #1 = { "irreversible" }
 "#;
-        let qasm = translate(ll).unwrap();
+        let qasm = translate(qir).unwrap();
         assert!(qasm.contains("h q[0];"), "\n{qasm}");
     }
 
     #[test]
     fn mresetz_emits_measure_and_reset_in_order() {
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1218,7 +1409,7 @@ declare void @__quantum__qis__mz__body(%Qubit*, %Result*) #1
 attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="1" "requiredResults"="2" }
 attributes #1 = { "irreversible" }
 "#;
-        let qasm = translate(ll).unwrap();
+        let qasm = translate(qir).unwrap();
         let m = qasm.find("c[0] = measure q[0];").unwrap();
         let r = qasm.find("reset q[0];").unwrap();
         let x = qasm.find("x q[0];").unwrap();
@@ -1227,7 +1418,7 @@ attributes #1 = { "irreversible" }
 
     #[test]
     fn phi_i64_if_merge_emits_int_declaration() {
-        let ll = r#"
+        let qir = r#"
 %Result = type opaque
 %Qubit = type opaque
 
@@ -1250,14 +1441,14 @@ declare i1 @__quantum__rt__read_result(%Result*)
 attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="1" "requiredResults"="1" }
 attributes #1 = { "irreversible" }
 "#;
-        let qasm = translate(ll).unwrap();
+        let qasm = translate(qir).unwrap();
         assert!(qasm.contains("int cint_0 = 0;"), "\n{qasm}");
         assert!(qasm.contains("cint_0 = 1;"), "\n{qasm}");
     }
 
     #[test]
     fn phi_i32_same_lowering_as_i64() {
-        let ll = r#"
+        let qir = r#"
 %Result = type opaque
 %Qubit = type opaque
 
@@ -1280,13 +1471,13 @@ declare i1 @__quantum__rt__read_result(%Result*)
 attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="1" "requiredResults"="1" }
 attributes #1 = { "irreversible" }
 "#;
-        let qasm = translate(ll).unwrap();
+        let qasm = translate(qir).unwrap();
         assert!(qasm.contains("int cint_0 = 0;"), "\n{qasm}");
     }
 
     #[test]
     fn phi_with_three_incomings_errors() {
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 
 define void @main() #0 {
@@ -1304,7 +1495,7 @@ done:
 declare void @__quantum__qis__h__body(%Qubit*)
 attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="1" "requiredResults"="0" }
 "#;
-        let err = translate(ll).unwrap_err();
+        let err = translate(qir).unwrap_err();
         assert!(
             err.to_string().contains("if-merge shape"),
             "unexpected error: {err}"
@@ -1313,7 +1504,7 @@ attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubit
 
     #[test]
     fn phi_with_two_unconditional_predecessors_errors() {
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 
 define void @main() #0 {
@@ -1327,7 +1518,7 @@ done:
 }
 attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="0" "requiredResults"="0" }
 "#;
-        let err = translate(ll).unwrap_err();
+        let err = translate(qir).unwrap_err();
         assert!(
             err.to_string().contains("if-merge shape"),
             "unexpected error: {err}"
@@ -1336,7 +1527,7 @@ attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubit
 
     #[test]
     fn phi_with_bogus_value_type_errors() {
-        let ll = r#"
+        let qir = r#"
 %Result = type opaque
 %Qubit = type opaque
 
@@ -1356,7 +1547,7 @@ declare i1 @__quantum__rt__read_result(%Result*)
 attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="1" "requiredResults"="1" }
 attributes #1 = { "irreversible" }
 "#;
-        let err = translate(ll).unwrap_err();
+        let err = translate(qir).unwrap_err();
         assert!(err.to_string().contains("phi i8"), "{err}");
     }
 
@@ -1366,7 +1557,7 @@ attributes #1 = { "irreversible" }
         // loop-carried merge. Out-of-scope per README; the error must
         // name the shape rather than pointing at "predecessor not
         // found among processed blocks".
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 
 define void @main() #0 {
@@ -1379,7 +1570,7 @@ loop:
 }
 attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="0" "requiredResults"="0" }
 "#;
-        let err = translate(ll).unwrap_err();
+        let err = translate(qir).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("loop-carried phi"), "{msg}");
         assert!(msg.contains("loop"), "{msg}");
@@ -1387,7 +1578,7 @@ attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubit
 
     #[test]
     fn select_i32_lowers_to_inline_arithmetic() {
-        let ll = r#"
+        let qir = r#"
 %Result = type opaque
 %Qubit = type opaque
 
@@ -1412,7 +1603,7 @@ declare i1 @__quantum__rt__read_result(%Result*)
 attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="2" "requiredResults"="1" }
 attributes #1 = { "irreversible" }
 "#;
-        let qasm = translate(ll).unwrap();
+        let qasm = translate(qir).unwrap();
         assert!(qasm.contains("c[0] * 5"), "\n{qasm}");
         assert!(qasm.contains("(1 - c[0]) * 3"), "\n{qasm}");
         assert!(qasm.contains(">= 4"), "\n{qasm}");
@@ -1420,7 +1611,7 @@ attributes #1 = { "irreversible" }
 
     #[test]
     fn zext_i1_to_int_aliases_ssa() {
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1444,7 +1635,7 @@ declare i1 @__quantum__rt__read_result(%Result*)
 attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="2" "requiredResults"="1" }
 attributes #1 = { "irreversible" }
 "#;
-        let qasm = translate(ll).unwrap();
+        let qasm = translate(qir).unwrap();
         // The `zext` result flows into `icmp sge, 1` which becomes
         // `c[0] >= 1` (or `c[0] == 1`) in the if condition.
         assert!(qasm.contains("c[0]"), "\n{qasm}");
@@ -1455,7 +1646,7 @@ attributes #1 = { "irreversible" }
     /// lowers to the predicate expression itself (widened to i64).
     #[test]
     fn phi_i64_landing_pad_binds_to_predicate_c_bit() {
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1489,7 +1680,7 @@ declare i1 @__quantum__rt__read_result(%Result*)
 attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="2" "requiredResults"="2" }
 attributes #1 = { "irreversible" }
 "#;
-        let qasm = translate(ll).unwrap();
+        let qasm = translate(qir).unwrap();
         assert!(
             qasm.contains("if (c[0] == 1) {\n  x q[1];\n}")
                 || qasm.contains("if (c[0]) {\n  x q[1];\n}"),
@@ -1506,7 +1697,7 @@ attributes #1 = { "irreversible" }
     /// collapses to `(1 - c[0]) == 1`.
     #[test]
     fn phi_i64_landing_pad_inverted_incomings_negates_predicate() {
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1539,7 +1730,7 @@ declare i1 @__quantum__rt__read_result(%Result*)
 attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="2" "requiredResults"="1" }
 attributes #1 = { "irreversible" }
 "#;
-        let qasm = translate(ll).unwrap();
+        let qasm = translate(qir).unwrap();
         assert!(
             qasm.contains("if (1 - c[0] == 1) {\n  x q[1];\n}")
                 || qasm.contains("if ((1 - c[0]) == 1) {\n  x q[1];\n}"),
@@ -1551,7 +1742,7 @@ attributes #1 = { "irreversible" }
     /// the existing unsupported error.
     #[test]
     fn phi_i64_landing_pad_non_binary_constants_still_errors() {
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1575,13 +1766,13 @@ declare i1 @__quantum__rt__read_result(%Result*)
 attributes #0 = { "entry_point" "qir_profiles"="adaptive_profile" "requiredQubits"="1" "requiredResults"="1" }
 attributes #1 = { "irreversible" }
 "#;
-        let err = translate(ll).unwrap_err();
+        let err = translate(qir).unwrap_err();
         assert!(err.to_string().contains("if-merge shape"), "{err}");
     }
 
     #[test]
     fn struct_return_type_with_malloc_and_insertvalue_translates() {
-        let ll = r#"
+        let qir = r#"
 %Qubit = type opaque
 %Result = type opaque
 
@@ -1614,7 +1805,7 @@ declare void @__quantum__rt__result_record_output(%Result*, i8*)
 attributes #0 = { "entry_point" "qir_profiles"="base_profile" "requiredQubits"="2" "requiredResults"="2" }
 attributes #1 = { "irreversible" }
 "#;
-        let qasm = translate(ll).unwrap();
+        let qasm = translate(qir).unwrap();
         assert!(qasm.contains("h q[0];"), "\n{qasm}");
         assert!(qasm.contains("cnot q[0], q[1];"), "\n{qasm}");
         assert!(qasm.contains("c[0] = measure q[0];"), "\n{qasm}");
@@ -1744,7 +1935,7 @@ attributes #0 = { \"entry_point\" \"qir_profiles\"=\"base_profile\" \"requiredQu
 
     #[test]
     fn adaptive_qir_profile_appears_in_generated_by_line() {
-        let ll = "\
+        let qir = "\
 %Qubit = type opaque
 define void @main() #0 {
   call void @__quantum__qis__h__body(%Qubit* null)
@@ -1753,7 +1944,7 @@ define void @main() #0 {
 declare void @__quantum__qis__h__body(%Qubit*)
 attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requiredQubits\"=\"1\" \"requiredResults\"=\"0\" }
 ";
-        let module = parse_module(ll).unwrap();
+        let module = parse_module(qir).unwrap();
         let out = Exporter::new().dumps(&module).unwrap();
         let last = last_non_empty_line(&out);
         assert!(
@@ -1765,7 +1956,7 @@ attributes #0 = { \"entry_point\" \"qir_profiles\"=\"adaptive_profile\" \"requir
     #[test]
     fn omits_profile_field_when_input_declares_none() {
         // No `qir_profiles` attribute — the field should be omitted.
-        let ll = "\
+        let qir = "\
 %Qubit = type opaque
 define void @main() #0 {
   call void @__quantum__qis__h__body(%Qubit* null)
@@ -1774,7 +1965,7 @@ define void @main() #0 {
 declare void @__quantum__qis__h__body(%Qubit*)
 attributes #0 = { \"entry_point\" }
 ";
-        let module = parse_module(ll).unwrap();
+        let module = parse_module(qir).unwrap();
         let out = Exporter::new().dumps(&module).unwrap();
         let last = last_non_empty_line(&out);
         assert!(
