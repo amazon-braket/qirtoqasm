@@ -233,7 +233,7 @@ All CI lives in `.github/workflows/`:
   release publication and on `v*` tag pushes. Linux x86_64 +
   aarch64 (manylinux2014 + musllinux_1_2), macOS x86_64 + arm64,
   Windows x86_64. One `cp311-abi3` wheel per platform — the abi3
-  tag means that wheel is also installable on 3.12 and 3.13.
+  tag means that wheel is also installable on 3.12, 3.13, and 3.14.
 - **`publish-to-pypi.yml`** — uploads the `wheels.yml` artifacts to
   PyPI via trusted publishing (OIDC). Triggered on release
   publication.
