@@ -542,7 +542,7 @@ All CI lives under `.github/workflows/`:
   release tags + publications build the full matrix (Linux
   manylinux2014 + musllinux_1_2 × x86_64 / aarch64, macOS x86_64 +
   arm64, Windows x86_64). One `cp311-abi3` wheel per platform covers
-  Python 3.11 + 3.12 + 3.13.
+  Python 3.11 + 3.12 + 3.13 + 3.14.
 - **`publish-to-pypi.yml`** — uploads `wheels.yml` artifacts via PyPI
   trusted publishing (OIDC) on release publication.
 - **`twine-check.yml`** — `twine check` on every PR.
