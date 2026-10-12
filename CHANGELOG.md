@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.0 (2026-10-12)
+
+### Features
+
+ * add Python 3.14 support
+
+### Bug Fixes and Other Changes
+
+ * misc code coverage and documentation updates
+
 ## v0.2.0 (2026-09-30)
 
 ### Features
