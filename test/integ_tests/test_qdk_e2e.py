@@ -13,7 +13,7 @@
 
 """Q# → QIR → qirtoqasm → Braket LocalSimulator e2e tests.
 
-Each fixture runs in a subprocess (qsharp.init resets interpreter state).
+Each fixture runs in a subprocess (qdk.init resets interpreter state).
 The *_reset_return.qs variants also run on the native Q# simulator for
 cross-simulator correctness validation.
 """
@@ -31,11 +31,11 @@ from _helpers import SHOTS, approx, assert_distributions_equivalent
 
 pytestmark = pytest.mark.integ
 
-pytest.importorskip("qsharp")
+pytest.importorskip("qdk")
 pytest.importorskip("braket.devices")
 
 FIXTURES = Path(__file__).parent / "fixtures_qsharp"
-RUNNER = Path(__file__).parent / "_qsharp_runner.py"
+RUNNER = Path(__file__).parent / "_qdk_runner.py"
 
 
 def _run(fixture: str, entry: str, profile: str, *, native_sim: bool = False) -> dict:

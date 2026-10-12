@@ -19,7 +19,7 @@ qirtoqasm/
 ├── scripts/sync_version.py         propagate _version.py → pyproject.toml + Cargo.toml
 ├── test/
 │   ├── unit_tests/                 pytest against the Rust-backed wheel
-│   └── integ_tests/                fixtures + fixture-parity + e2e (braket / qsharp / cudaq)
+│   └── integ_tests/                fixtures + fixture-parity + e2e (braket / qdk / cudaq)
 ├── doc/                            Sphinx docs (RTD-hosted)
 └── .github/workflows/              CI
 ```
@@ -99,7 +99,7 @@ tox
 ```
 
 `tox` alone executes: `clean`, `linters`, `docs`, `unit-tests`,
-`integ-fixture-parity`, `integ-braket`, `integ-qsharp`, `integ-cudaq`.
+`integ-fixture-parity`, `integ-braket`, `integ-qdk`, `integ-cudaq`.
 
 
 ## Running individual tox environments
@@ -113,7 +113,7 @@ tox
 | `tox -e unit-tests`      | `pytest test/unit_tests/` with coverage, no Braket |
 | `tox -e integ-fixture-parity`    | Byte-exact `.ll` → `.qasm` regression + qirrunner vs Braket cross-sim |
 | `tox -e integ-braket`    | qirtoqasm → Braket LocalSimulator |
-| `tox -e integ-qsharp`    | Q# → QIR → qirtoqasm → Braket (subprocess-isolated) |
+| `tox -e integ-qdk`       | Q# → QIR → qirtoqasm → Braket (subprocess-isolated) |
 | `tox -e integ-cudaq`     | CUDA-Q → QIR → qirtoqasm → Braket (Linux/macOS only) |
 | `tox -e integ-tests`     | Run every `integ-*` tier back-to-back |
 | `tox -e build-wheel`     | `maturin build` sanity check |
@@ -222,7 +222,7 @@ All CI lives in `.github/workflows/`:
   pull requests. Jobs: `build` (3 OS × 3 py, cargo build/test + tox
   unit-tests + Codecov), `msrv` (rust 1.85 on Ubuntu), `coverage`
   (cargo-llvm-cov ≥ 97%), `integ-fixture-parity`, `integ-braket`,
-  `integ-qsharp`, `integ-cudaq` (Linux + macOS only), `cpp-smoke`
+  `integ-qdk`, `integ-cudaq` (Linux + macOS only), `cpp-smoke`
   and `c-smoke` (each on Ubuntu + macOS + Windows, built via CMake
   with warnings-as-errors, asserting on translation output for all
   four API call shapes — default options, populated options, error

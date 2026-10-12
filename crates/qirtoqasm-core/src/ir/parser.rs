@@ -616,19 +616,35 @@ fn effective_opcode(line: &str) -> &str {
     first_token(strip_call_prefix_qualifiers(rest))
 }
 
+/// Strip the calling-convention and return-attribute keywords that may
+/// sit between `call` and the return type (e.g. `call zeroext i1 @f(...)`
+/// or `call fastcc noundef i1 @f(...)`), returning the trimmed remainder
+/// that starts at the return type.
+fn strip_call_return_prefix(s: &str) -> &str {
+    const KEYWORDS: [&str; 12] = [
+        "ccc", "fastcc", "coldcc", "tailcc", "swiftcc", "zeroext", "signext", "noext", "inreg",
+        "noalias", "nonnull", "noundef",
+    ];
+    let mut rest = s.trim_start();
+    while KEYWORDS.contains(&first_token(rest)) {
+        rest = after_token(rest);
+    }
+    rest
+}
+
 // ---------------------------------------------------------------------------
 // Individual instruction parsers
 // ---------------------------------------------------------------------------
 
 fn parse_call(result: Option<String>, args: &str) -> Result<Instruction> {
-    // Shape:  <retty> [(param-type-list)] @<callee>(<operands>) [fn-attrs]
+    // Shape:  [cconv] [ret-attrs] <retty> [(param-type-list)] @<callee>(<operands>) [fn-attrs]
     //
     // When a callee is variadic, LLVM's textual form prefixes the call
     // with a function-type list, e.g.
     //   call void (i64, ..., i8*, ...) @generalizedInvoke(...)
     // We detect and skip that prefix parenthesised group so the `@name`
     // that follows is recognized as the callee.
-    let mut rest = args;
+    let mut rest = strip_call_return_prefix(args);
     let return_type = first_token(rest);
     rest = after_token(rest);
     // Optional `(type, type, ..., ...)` function-type prefix.
@@ -1717,6 +1733,45 @@ mod more_tests {
             panic!()
         };
         assert_eq!(callee, "__quantum__qis__h__body");
+    }
+
+    #[test]
+    fn parse_call_skips_return_attributes_before_return_type() {
+        let out = parse_instruction_line(
+            "%0 = call zeroext i1 @__quantum__rt__read_result(%Result* inttoptr (i64 1 to %Result*))",
+        )
+        .unwrap();
+        let Instruction::Call {
+            result,
+            callee,
+            args,
+            return_type,
+        } = out
+        else {
+            panic!("expected Call")
+        };
+        assert_eq!(result.as_deref(), Some("0"));
+        assert_eq!(callee, "__quantum__rt__read_result");
+        assert_eq!(return_type, "i1");
+        let [Operand::PtrConst { struct_name, index }] = args.as_slice() else {
+            panic!("unexpected operands: {args:?}")
+        };
+        assert_eq!(struct_name.as_deref(), Some("Result"));
+        assert_eq!(*index, 1);
+
+        let out =
+            parse_instruction_line("%r = tail call fastcc noundef signext i1 @read(ptr null)")
+                .unwrap();
+        let Instruction::Call {
+            callee,
+            return_type,
+            ..
+        } = out
+        else {
+            panic!("expected Call")
+        };
+        assert_eq!(callee, "read");
+        assert_eq!(return_type, "i1");
     }
 
     #[test]

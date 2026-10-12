@@ -88,14 +88,14 @@ consistency.
 1. Run the tests:
    ```bash
    # Full pre-PR suite (lint + docs + unit + integ-fixture-parity +
-   # integ-braket + integ-qsharp + integ-cudaq).
+   # integ-braket + integ-qdk + integ-cudaq).
    tox
 
    # Individual tiers:
    tox -e unit-tests            # unit tests only
    tox -e integ-fixture-parity  # .ll / .qasm regression suite (no Braket)
    tox -e integ-braket          # qirtoqasm → Braket LocalSimulator
-   tox -e integ-qsharp          # Q# → qirtoqasm → Braket
+   tox -e integ-qdk             # Q# → qirtoqasm → Braket
    tox -e integ-cudaq           # CUDA-Q → qirtoqasm → Braket (Linux/macOS only)
    ```
 
