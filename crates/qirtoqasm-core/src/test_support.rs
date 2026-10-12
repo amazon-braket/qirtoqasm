@@ -72,39 +72,11 @@ pub fn qir_entry(body: &str) -> String {
     )
 }
 
-/// Wrap `body`, parse, and translate to OQ3 source. Panics on any
-/// parse / translate failure so tests can `assert!(out.contains(…))`
-/// directly.
-pub fn translate(body: &str) -> String {
-    let qir = qir_entry(body);
-    let module = parse_module(&qir).expect("parse_module failed in test_support::translate");
-    Exporter::new()
-        .dumps(&module)
-        .expect("Exporter::dumps failed in test_support::translate")
-}
-
 /// Wrap `body`, parse, and translate; return the error string.
 /// Panics if translation unexpectedly succeeds.
 pub fn translate_err(body: &str) -> String {
     let qir = qir_entry(body);
     let module = parse_module(&qir).expect("parse_module failed in test_support::translate_err");
-    Exporter::new()
-        .dumps(&module)
-        .expect_err("expected translate to fail")
-        .to_string()
-}
-
-/// Translate raw QIR source (no body wrapping). Panics on failure.
-pub fn translate_raw(qir: &str) -> String {
-    let module = parse_module(qir).expect("parse_module failed in test_support::translate_raw");
-    Exporter::new()
-        .dumps(&module)
-        .expect("Exporter::dumps failed in test_support::translate_raw")
-}
-
-/// Translate raw QIR source (no body wrapping); return the error string.
-pub fn translate_raw_err(qir: &str) -> String {
-    let module = parse_module(qir).expect("parse_module failed in test_support::translate_raw_err");
     Exporter::new()
         .dumps(&module)
         .expect_err("expected translate to fail")

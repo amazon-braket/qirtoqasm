@@ -1,7 +1,7 @@
 # Main CI pipeline, driven by tox.
 #
 # build     — cargo build/test, lint, tox unit-tests. No Braket / Q# /
-#             CUDA-Q. 3 OS × 3 Py.
+#             CUDA-Q. 3 OS × all supported Python versions.
 # msrv      — rust 1.85 build + test on Ubuntu.
 #
 # integ-* (braket / qdk / cudaq / fixture-parity) and the C/C++ smoke jobs

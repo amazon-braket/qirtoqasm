@@ -90,11 +90,10 @@ pub fn extract_signatures(qir_source: &str) -> Result<SignatureTable> {
     Ok(table)
 }
 
+/// Parse a `declare` / `define` line. `line` must start (after leading
+/// whitespace) with `keyword`; `extract_signatures` guarantees this.
 fn parse_signature_line(line: &str, keyword: &str) -> Result<FunctionSignature> {
-    let idx = line.find(keyword).ok_or_else(|| {
-        QirToQasmError::syntax(format!("could not parse signature line: {line:?}"))
-    })?;
-    let rest = &line[idx + keyword.len()..];
+    let rest = &line.trim_start()[keyword.len()..];
 
     // After the keyword, an optional linkage/visibility string may appear
     // before the return type. For `define`, common ones include
@@ -467,6 +466,25 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("unexpected '...' in non-terminal position"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn extract_signatures_rejects_unbalanced_param_parens() {
+        let err = extract_signatures("declare void @f(i64\n").unwrap_err();
+        assert!(
+            err.to_string().contains("unbalanced parens in signature"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn extract_signatures_rejects_unterminated_struct_param() {
+        let err = extract_signatures("declare void @f({ double*, i64)\n").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unterminated struct parameter type in signature"),
             "{err}"
         );
     }

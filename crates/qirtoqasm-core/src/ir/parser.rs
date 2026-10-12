@@ -1741,37 +1741,31 @@ mod more_tests {
             "%0 = call zeroext i1 @__quantum__rt__read_result(%Result* inttoptr (i64 1 to %Result*))",
         )
         .unwrap();
-        let Instruction::Call {
-            result,
-            callee,
-            args,
-            return_type,
-        } = out
-        else {
-            panic!("expected Call")
-        };
-        assert_eq!(result.as_deref(), Some("0"));
-        assert_eq!(callee, "__quantum__rt__read_result");
-        assert_eq!(return_type, "i1");
-        let [Operand::PtrConst { struct_name, index }] = args.as_slice() else {
-            panic!("unexpected operands: {args:?}")
-        };
-        assert_eq!(struct_name.as_deref(), Some("Result"));
-        assert_eq!(*index, 1);
+        assert!(
+            matches!(
+                &out,
+                Instruction::Call { result: Some(r), callee, args, return_type }
+                    if r == "0"
+                        && callee == "__quantum__rt__read_result"
+                        && return_type == "i1"
+                        && matches!(
+                            args.as_slice(),
+                            [Operand::PtrConst { struct_name: Some(s), index: 1 }] if s == "Result"
+                        )
+            ),
+            "{out:?}"
+        );
 
         let out =
             parse_instruction_line("%r = tail call fastcc noundef signext i1 @read(ptr null)")
                 .unwrap();
-        let Instruction::Call {
-            callee,
-            return_type,
-            ..
-        } = out
-        else {
-            panic!("expected Call")
-        };
-        assert_eq!(callee, "read");
-        assert_eq!(return_type, "i1");
+        assert!(
+            matches!(
+                &out,
+                Instruction::Call { callee, return_type, .. } if callee == "read" && return_type == "i1"
+            ),
+            "{out:?}"
+        );
     }
 
     #[test]
@@ -2193,6 +2187,111 @@ mod final_coverage_tests {
     fn call_missing_paren_after_callee_errors() {
         let err = parse_instruction_line("call void @foo").unwrap_err();
         assert!(err.to_string().contains("missing ( after callee"));
+    }
+
+    #[test]
+    fn call_without_global_callee_errors() {
+        let err = parse_instruction_line("call void foo()").unwrap_err();
+        assert!(
+            err.to_string().contains("could not parse callee in call"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn declare_without_function_name_errors() {
+        let err = parse_module("declare void foo()\n").unwrap_err();
+        assert!(err.to_string().contains("could not parse declare"), "{err}");
+    }
+
+    #[test]
+    fn define_without_function_name_errors() {
+        let err = parse_module("define void main() {\n  ret void\n}\n").unwrap_err();
+        assert!(
+            err.to_string().contains("could not parse define header"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn define_without_body_block_errors() {
+        let err = parse_module("define void @main() #0\n").unwrap_err();
+        assert!(
+            err.to_string().contains("define without body block"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn multi_line_call_skips_blank_continuation_lines() {
+        let src = "define void @main() #0 {\n  call void @f(\n\n    %Qubit* null)\n  ret void\n}\n";
+        let module = parse_module(src).unwrap();
+        let body = &module.functions[0].blocks[0].instructions;
+        assert!(
+            matches!(&body[0], Instruction::Call { callee, args, .. } if callee == "f" && args.len() == 1),
+            "{body:?}"
+        );
+    }
+
+    #[test]
+    fn multi_line_call_unterminated_at_eof_errors() {
+        let err = parse_module("define void @main() #0 {\n  call void @f(\n").unwrap_err();
+        assert!(
+            err.to_string().contains("unterminated instruction"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn br_cond_rejects_non_label_true_target() {
+        let err = parse_instruction_line("br i1 %c, something_else, label %f").unwrap_err();
+        assert!(err.to_string().contains("expected 'label %name'"), "{err}");
+    }
+
+    #[test]
+    fn phi_without_incomings_errors() {
+        let err = parse_instruction_line("%c = phi i1").unwrap_err();
+        assert!(err.to_string().contains("phi has no incomings"), "{err}");
+    }
+
+    #[test]
+    fn instruction_line_ignores_trailing_comment() {
+        let out = parse_instruction_line("br label %exit ; done").unwrap();
+        assert!(
+            matches!(&out, Instruction::Br { target } if target == "exit"),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn pointer_operand_fallback_forms() {
+        assert!(matches!(parse_operand("i8 null").unwrap(), Operand::I8Null));
+        assert!(matches!(
+            parse_operand("getelementptr inbounds ([2 x i8], [2 x i8]* @0, i64 0, i64 0)").unwrap(),
+            Operand::GetElementPtr
+        ));
+        assert!(matches!(
+            parse_operand("i8* bitcast (i8* null to i8*)").unwrap(),
+            Operand::GetElementPtr
+        ));
+    }
+
+    #[test]
+    fn malformed_memory_ops_fall_back_to_ignored() {
+        for (line, opcode) in [
+            ("%6 = load double", "load"),
+            ("store double 0.1", "store"),
+            (
+                "%4 = getelementptr [2 x double], [2 x double]* %2, i32 1, i32 1",
+                "getelementptr",
+            ),
+        ] {
+            let out = parse_instruction_line(line).unwrap();
+            assert!(
+                matches!(&out, Instruction::Ignored { opcode: o } if o == opcode),
+                "{line}: {out:?}"
+            );
+        }
     }
 
     #[test]

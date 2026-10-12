@@ -630,6 +630,28 @@ mod more_tests {
     }
 
     #[test]
+    fn expect_signature_lists_three_or_more_expected_params() {
+        let signature = sig("f", &["Qubit"], "void");
+        let err = expect_signature(&signature, &["Qubit", "Qubit", "Result"], "test").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains(r#"expected ["Qubit", "Qubit", "Result"]"#),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn as_i64_operand_rejects_out_of_range_constant() {
+        let too_big = Operand::ConstInt(i128::from(i64::MAX) + 1);
+        let err = as_i64_operand(&too_big, "callee", "numControls").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("callee: numControls = 9223372036854775808 does not fit in i64"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn reset_with_bad_signature_errors() {
         let mut s = SymbolTable::new();
         let b = FunctionBuilder::Reset;

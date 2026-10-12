@@ -308,6 +308,15 @@ mod more_tests {
     use super::*;
 
     #[test]
+    fn operand_to_expression_maps_constants_and_rejects_ssa() {
+        assert_eq!(
+            operand_to_expression(&Operand::ConstBool(true)),
+            Some(Expression::Boolean(true))
+        );
+        assert_eq!(operand_to_expression(&Operand::Ssa("x".into())), None);
+    }
+
+    #[test]
     fn symbol_table_default_matches_new() {
         let s = SymbolTable::default();
         assert_eq!(s.max_qubit_index, 0); // Default is 0 (Default derive) — intentionally different from new()

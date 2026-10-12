@@ -219,31 +219,38 @@ cmake --build build --target qirtoqasm_c_smoke
 All CI lives in `.github/workflows/`:
 
 - **`ci.yml`** — the main pipeline. Runs on pushes to `main` and on
-  pull requests. Jobs: `build` (3 OS × 3 py, cargo build/test + tox
-  unit-tests + Codecov), `msrv` (rust 1.85 on Ubuntu), `coverage`
-  (cargo-llvm-cov ≥ 97%), `integ-fixture-parity`, `integ-braket`,
-  `integ-qdk`, `integ-cudaq` (Linux + macOS only), `cpp-smoke`
-  and `c-smoke` (each on Ubuntu + macOS + Windows, built via CMake
-  with warnings-as-errors, asserting on translation output for all
-  four API call shapes — default options, populated options, error
-  path, version). Integ jobs `needs: [build, cpp-smoke, c-smoke]`
-  so a broken native ABI blocks them.
-- **`wheels.yml`** — `cibuildwheel` per-platform wheel matrix. A
-  smoke build runs on PRs (Ubuntu only); the full matrix runs on
-  release publication and on `v*` tag pushes. Linux x86_64 +
-  aarch64 (manylinux2014 + musllinux_1_2), macOS x86_64 + arm64,
-  Windows x86_64. One `cp311-abi3` wheel per platform — the abi3
-  tag means that wheel is also installable on 3.12, 3.13, and 3.14.
-- **`publish-to-pypi.yml`** — uploads the `wheels.yml` artifacts to
-  PyPI via trusted publishing (OIDC). Triggered on release
-  publication.
+  pull requests. Jobs: `build` (Ubuntu + macOS + Windows × all
+  supported Python versions; cargo build/test + fmt + clippy + tox
+  unit-tests + release-wheel build), `msrv` (rust 1.85 on Ubuntu),
+  `coverage` (cargo-llvm-cov ≥ 97%, uploaded to Codecov),
+  `integ-fixture-parity` (Ubuntu + macOS + Windows, Python 3.13),
+  `integ-braket`, `integ-qdk`, `integ-cudaq` (each Ubuntu, Python
+  3.13), `cpp-smoke` and `c-smoke` (each on Ubuntu + macOS + Windows,
+  built via CMake with warnings-as-errors, asserting on translation
+  output for all four API call shapes — default options, populated
+  options, error path, version). Integ jobs `needs: [build,
+  cpp-smoke, c-smoke]` so a broken native ABI blocks them.
+- **`wheel-smoke.yml`** — single-platform `cibuildwheel` smoke build
+  (`cp311-manylinux_x86_64`) on pushes to `main` and on PRs.
+- **`wheels.yml`** — full `cibuildwheel` per-platform wheel matrix
+  plus sdist, invoked from `publish-to-pypi.yml` or manually via
+  `workflow_dispatch`. Linux x86_64 (manylinux2014 + musllinux_1_2)
+  and aarch64 (manylinux2014), macOS x86_64 + arm64, Windows x86_64.
+  One `cp311-abi3` wheel per platform — the abi3 tag means that wheel
+  is installable on all supported Python versions.
+- **`publish-to-pypi.yml`** — on release publication, calls
+  `wheels.yml` and uploads its artifacts to PyPI via trusted
+  publishing (OIDC).
 - **`twine-check.yml`** — builds an sdist and runs `twine check` on
   every PR.
 - **`check-format.yml`** — runs `tox -e linters-check` on every PR.
+- **`codeql.yml`** — CodeQL analysis on pushes to `main`, PRs, and a
+  weekly schedule.
 - **`code-freeze.yml`** — gates PR merges during release freeze
   windows (uses `vars.FROZEN` / `vars.UNFROZEN_PREFIX`).
-- **`dependabot.yml`** — weekly GitHub Actions + Cargo (grouped
-  minor/patch) + pip dependency updates.
+
+`.github/dependabot.yml` schedules weekly GitHub Actions + Cargo
+(grouped minor/patch) + pip dependency updates.
 
 
 ## Releasing
