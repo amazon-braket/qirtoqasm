@@ -269,18 +269,12 @@ pub fn lower_phi_i1_short_circuit(
             rhs_pair = Some(inc);
         }
     }
-    let (sc_name, sc_value) = sc_pred.ok_or_else(|| {
-        QirToQasmError::unsupported(
+    let (Some((sc_name, sc_value)), Some(rhs)) = (sc_pred, rhs_pair) else {
+        return Err(QirToQasmError::unsupported(
             "phi i1 does not match the short-circuit Boolean pattern: \
              expected exactly one constant incoming and one SSA incoming",
-        )
-    })?;
-    let rhs = rhs_pair.ok_or_else(|| {
-        QirToQasmError::unsupported(
-            "phi i1 does not match the short-circuit Boolean pattern: \
-             expected exactly one constant incoming and one SSA incoming",
-        )
-    })?;
+        ));
+    };
 
     let lhs_expr = pred_conditions.get(sc_name).cloned().ok_or_else(|| {
         QirToQasmError::unsupported(format!(
@@ -1243,6 +1237,23 @@ mod more_tests {
     }
 
     #[test]
+    fn resolve_i1_operand_maps_constants_to_integer_literals() {
+        let s = SymbolTable::new();
+        for (op, want) in [
+            (Operand::ConstBool(true), 1),
+            (Operand::ConstBool(false), 0),
+            (Operand::ConstInt(0), 0),
+            (Operand::ConstInt(1), 1),
+        ] {
+            assert_eq!(
+                super::resolve_i1_operand(&s, &op).unwrap(),
+                Expression::Integer(want),
+                "{op:?}"
+            );
+        }
+    }
+
+    #[test]
     fn as_boolean_expression_passes_through_comparison() {
         let e = Expression::Binary {
             op: BinaryOp::Eq,
@@ -1320,16 +1331,7 @@ mod rhs_pair_none_coverage {
     use super::*;
     use crate::oq3::ast::index_expr;
 
-    /// Both incomings are constant — a previous test covers the
-    /// "two constants" branch. What about exactly one constant with
-    /// no rhs at all? That happens when `incomings.len() == 2` and
-    /// both are constant AND equal — the first gets assigned to
-    /// sc_pred, and after the "two constants" check triggers, we
-    /// don't reach the rhs_pair check. Constructing a synthetic case
-    /// where sc_pred is Some but rhs_pair is None requires a single-
-    /// incoming list, which our length-check intercepts first. The
-    /// rhs_pair-None branch is consequently unreachable on valid
-    /// input. Keeping this regression test here as a tripwire.
+    /// One constant incoming plus one SSA incoming binds the phi result.
     #[test]
     fn both_incomings_identified_correctly() {
         let mut s = SymbolTable::new();

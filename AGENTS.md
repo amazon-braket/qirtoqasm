@@ -523,34 +523,47 @@ in an on-disk file.
 All CI lives under `.github/workflows/`:
 
 - **`ci.yml`** — main pipeline on pushes to `main` and PRs. Jobs:
-  - `build` — cargo build/test + lint + `tox -e unit-tests` +
-    `tox -e integ-fixture-parity`, 3 OS × 3 Py matrix. No Braket.
+  - `build` — cargo build/test + fmt + clippy + `tox -e unit-tests`
+    + release-wheel build, on Ubuntu + macOS + Windows × all
+    supported Python versions. No Braket. The wheel it builds is
+    the artifact every integ job installs.
   - `msrv` — Rust 1.85 build + test on Ubuntu.
-  - `coverage` — `cargo llvm-cov` ≥ 97% on `qirtoqasm-core`.
-  - `integ-braket` — all three OSes × 3 Py.
-  - `integ-qdk` — all three OSes × 3 Py.
-  - `integ-cudaq` — Linux + macOS × 3 Py (no Windows cudaq wheel).
+  - `coverage` — `cargo llvm-cov` ≥ 97% lines on `qirtoqasm-core`
+    (`test_support.rs` excluded), uploaded to Codecov.
   - `cpp-smoke` — CMake build + run of `cmake/cpp_smoke.cpp`
     (C++20, `-Wall -Wextra -Werror -Wpedantic` / MSVC `/W4 /WX
     /permissive-`) on Ubuntu + macOS + Windows.
   - `c-smoke` — CMake build + run of `cmake/c_smoke.c` (C11,
     same warnings-as-errors set) on the same 3-OS matrix.
-    `integ-fixture-parity`, `integ-braket`, `integ-qdk`,
-    `integ-cudaq` all `needs: [build, cpp-smoke, c-smoke]`, so a
-    broken native ABI blocks the Python integ tiers.
-- **`wheels.yml`** — cibuildwheel. PR runs a single-platform smoke;
-  release tags + publications build the full matrix (Linux
-  manylinux2014 + musllinux_1_2 × x86_64 / aarch64, macOS x86_64 +
-  arm64, Windows x86_64). One `cp311-abi3` wheel per platform covers
-  Python 3.11 + 3.12 + 3.13 + 3.14.
-- **`publish-to-pypi.yml`** — uploads `wheels.yml` artifacts via PyPI
-  trusted publishing (OIDC) on release publication.
+  - `integ-fixture-parity` — fixture-parity + known-limitations
+    tests on Ubuntu + macOS + Windows, Python 3.13.
+  - `integ-braket` — Ubuntu, Python 3.13.
+  - `integ-qdk` — Ubuntu, Python 3.13.
+  - `integ-cudaq` — Ubuntu, Python 3.13.
+
+  `integ-fixture-parity`, `integ-braket`, `integ-qdk`, and
+  `integ-cudaq` all `needs: [build, cpp-smoke, c-smoke]`, so a
+  broken native ABI blocks the Python integ tiers.
+- **`wheel-smoke.yml`** — single-platform cibuildwheel smoke
+  (`cp311-manylinux_x86_64`) on pushes to `main` and PRs.
+- **`wheels.yml`** — full cibuildwheel matrix (Linux manylinux2014 +
+  musllinux_1_2 on x86_64, manylinux2014 on aarch64, macOS x86_64 +
+  arm64, Windows x86_64) plus sdist. Invoked from
+  `publish-to-pypi.yml` via `workflow_call`, or manually via
+  `workflow_dispatch`. One `cp311-abi3` wheel per platform covers all
+  supported Python versions.
+- **`publish-to-pypi.yml`** — on release publication, calls
+  `wheels.yml` and uploads its artifacts via PyPI trusted publishing
+  (OIDC).
 - **`twine-check.yml`** — `twine check` on every PR.
 - **`check-format.yml`** — `tox -e linters-check` on every PR.
+- **`codeql.yml`** — CodeQL analysis on pushes to `main`, PRs, and a
+  weekly schedule.
 - **`code-freeze.yml`** — gates merges during release-freeze windows
   using `vars.FROZEN` / `vars.UNFROZEN_PREFIX`.
-- **`dependabot.yml`** — weekly GitHub Actions + Cargo (grouped
-  minor/patch) + pip updates.
+
+`.github/dependabot.yml` schedules weekly GitHub Actions + Cargo
+(grouped minor/patch) + pip updates.
 
 
 ## Release process
