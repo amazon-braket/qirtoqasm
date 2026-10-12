@@ -166,7 +166,7 @@ qirtoqasm/
 ├── scripts/sync_version.py         propagate _version.py → pyproject.toml + Cargo.toml
 ├── test/
 │   ├── unit_tests/                 pytest against the wheel (no Braket)
-│   └── integ_tests/                fixtures + fixture-parity + e2e (braket / qsharp / cudaq)
+│   └── integ_tests/                fixtures + fixture-parity + e2e (braket / qdk / cudaq)
 ├── doc/                            Sphinx docs (Read the Docs)
 └── .github/workflows/              CI
 ```
@@ -199,7 +199,7 @@ tox
 ```
 
 The default `tox` envlist runs: `clean,linters,docs,unit-tests,
-integ-fixture-parity,integ-braket,integ-qsharp,integ-cudaq`.
+integ-fixture-parity,integ-braket,integ-qdk,integ-cudaq`.
 
 
 ## Build, test, lint cheat sheet
@@ -217,7 +217,7 @@ so local success means CI success.
 | `tox -e unit-tests`      | pytest unit suite (no Braket); 100% coverage required |
 | `tox -e integ-fixture-parity`    | `.ll` → `.qasm` byte-exact regression + qirrunner vs Braket cross-sim |
 | `tox -e integ-braket`    | qirtoqasm → Braket LocalSimulator |
-| `tox -e integ-qsharp`    | Q# → QIR → qirtoqasm → Braket (subprocess-isolated) |
+| `tox -e integ-qdk`       | Q# → QIR → qirtoqasm → Braket (subprocess-isolated) |
 | `tox -e integ-cudaq`     | CUDA-Q → QIR → qirtoqasm → Braket (Linux + macOS) |
 | `tox -e integ-tests`     | Run every `integ-*` tier back-to-back |
 | `tox -e build-wheel`     | `maturin build` smoke (CI uses cibuildwheel) |
@@ -497,17 +497,17 @@ Four tiers, each with its own tox env.
    - `tox -e integ-fixture-parity` — `.ll` → `.qasm` byte regression. No
      Braket.
    - `tox -e integ-braket` — end-to-end on Braket LocalSimulator.
-   - `tox -e integ-qsharp` — Q# source → QIR (via the `qsharp`
+   - `tox -e integ-qdk` — Q# source → QIR (via the `qdk`
      PyPI package) → qirtoqasm → Braket. Subprocess-isolated per check.
    - `tox -e integ-cudaq` — CUDA-Q kernel → QIR → qirtoqasm → Braket.
      Subprocess-isolated. Linux + macOS only.
 
 ### Subprocess isolation: why and how
 
-`test_qsharp_e2e.py` and `test_cudaq_e2e.py` spawn a fresh Python
+`test_qdk_e2e.py` and `test_cudaq_e2e.py` spawn a fresh Python
 subprocess per check because:
 
-- `qsharp.init(target_profile=...)` resets interpreter state
+- `qdk.init(target_profile=...)` resets interpreter state
   process-wide.
 - CUDA-Q's MLIR JIT carries process-wide state that can segfault on
   back-to-back kernel compilations.
@@ -528,14 +528,14 @@ All CI lives under `.github/workflows/`:
   - `msrv` — Rust 1.85 build + test on Ubuntu.
   - `coverage` — `cargo llvm-cov` ≥ 97% on `qirtoqasm-core`.
   - `integ-braket` — all three OSes × 3 Py.
-  - `integ-qsharp` — all three OSes × 3 Py.
+  - `integ-qdk` — all three OSes × 3 Py.
   - `integ-cudaq` — Linux + macOS × 3 Py (no Windows cudaq wheel).
   - `cpp-smoke` — CMake build + run of `cmake/cpp_smoke.cpp`
     (C++20, `-Wall -Wextra -Werror -Wpedantic` / MSVC `/W4 /WX
     /permissive-`) on Ubuntu + macOS + Windows.
   - `c-smoke` — CMake build + run of `cmake/c_smoke.c` (C11,
     same warnings-as-errors set) on the same 3-OS matrix.
-    `integ-fixture-parity`, `integ-braket`, `integ-qsharp`,
+    `integ-fixture-parity`, `integ-braket`, `integ-qdk`,
     `integ-cudaq` all `needs: [build, cpp-smoke, c-smoke]`, so a
     broken native ABI blocks the Python integ tiers.
 - **`wheels.yml`** — cibuildwheel. PR runs a single-platform smoke;

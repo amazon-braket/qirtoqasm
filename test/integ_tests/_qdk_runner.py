@@ -11,7 +11,7 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 
-"""Subprocess runner: python _qsharp_runner.py <fixture> <entry> <profile> <shots> [--native-sim]"""
+"""Subprocess runner: python _qdk_runner.py <fixture> <entry> <profile> <shots> [--native-sim]"""
 
 from __future__ import annotations
 
@@ -20,14 +20,15 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import qdk
 import qirtoqasm
-import qsharp
 from braket.devices import LocalSimulator
 from braket.ir.openqasm import Program
+from qdk import qsharp
 
 
 def native_sim(source: str, entry: str, shots: int) -> dict:
-    qsharp.init(target_profile=qsharp.TargetProfile.Unrestricted)
+    qdk.init(target_profile=qdk.TargetProfile.Unrestricted)
     qsharp.eval(source)
     raw_results = qsharp.run(entry, shots=shots)
     counts: Counter = Counter()
@@ -41,7 +42,7 @@ def native_sim(source: str, entry: str, shots: int) -> dict:
 
 
 def braket_pipeline(source: str, entry: str, profile: str, shots: int) -> tuple[dict, str]:
-    qsharp.init(target_profile=getattr(qsharp.TargetProfile, profile))
+    qdk.init(target_profile=getattr(qdk.TargetProfile, profile))
     qsharp.eval(source)
     qir_text = str(qsharp.compile(entry))
 

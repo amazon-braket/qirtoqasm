@@ -47,7 +47,7 @@ fixture-parity regression tests, and the Braket + Q# end-to-end tests).
    tox -e integ-braket
 
    # Q# → qirtoqasm → Braket (subprocess-isolated).
-   tox -e integ-qsharp
+   tox -e integ-qdk
 
    # CUDA-Q → qirtoqasm → Braket (subprocess-isolated;
    # Linux and macOS only — no Windows wheels for cudaq).

@@ -49,8 +49,8 @@ dev = [
     "twine>=5.0",
 ]
 # Microsoft Q# → QIR → qirtoqasm → Braket. Linux / macOS / Windows.
-qsharp = [
-    "qsharp>=1.19",
+qdk = [
+    "qdk>=1.31",
 ]
 # NVIDIA CUDA-Q → QIR → qirtoqasm → Braket. Linux / macOS only — no
 # Windows wheels.
@@ -83,7 +83,7 @@ include = ["LICENSE", "NOTICE"]
 testpaths = ["test/unit_tests"]
 addopts = "-ra -p no:anyio"
 markers = [
-    "integ: end-to-end tests needing braket / qsharp / cudaq at runtime (deselect with '-m \"not integ\"')",
+    "integ: end-to-end tests needing braket / qdk / cudaq at runtime (deselect with '-m \"not integ\"')",
 ]
 
 [tool.coverage.run]

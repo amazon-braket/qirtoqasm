@@ -4,7 +4,7 @@
 #             CUDA-Q. 3 OS × 3 Py.
 # msrv      — rust 1.85 build + test on Ubuntu.
 #
-# integ-* (braket / qsharp / cudaq / fixture-parity) and the C/C++ smoke jobs
+# integ-* (braket / qdk / cudaq / fixture-parity) and the C/C++ smoke jobs
 # land alongside the code they exercise.
 
 name: CI
@@ -244,7 +244,7 @@ jobs:
         run: pytest test/integ_tests/test_braket_e2e.py -n auto -p no:anyio -q
 
   # Q# → QIR → qirtoqasm → Braket, subprocess-isolated per test case.
-  integ-qsharp:
+  integ-qdk:
     name: Integ / Q# (${{ matrix.os }} / py ${{ matrix.python-version }})
     needs: [build, cpp-smoke, c-smoke]
     runs-on: ${{ matrix.os }}
@@ -266,9 +266,9 @@ jobs:
       - name: Install release wheel + integ deps
         shell: bash
         run: |
-          pip install "$(ls dist/qirtoqasm-*.whl)[test,qsharp]"
+          pip install "$(ls dist/qirtoqasm-*.whl)[test,qdk]"
       - name: Run Q# e2e integ tests
-        run: pytest test/integ_tests/test_qsharp_e2e.py -n auto -p no:anyio -q
+        run: pytest test/integ_tests/test_qdk_e2e.py -n auto -p no:anyio -q
 
   # CUDA-Q → QIR → qirtoqasm → Braket. Linux + macOS only — no Windows wheels.
   # Subprocess-isolated per test case: CUDA-Q's MLIR JIT carries process-wide
